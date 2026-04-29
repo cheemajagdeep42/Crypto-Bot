@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Crypto Signal Dashboard</title>
+        <link rel="stylesheet" href="/styles.css">
+    </head>
+    <body>
+        <main class="app">
+            <section class="toolbar" aria-label="Dashboard controls">
+                <div>
+                    <h1>Crypto Signal Dashboard</h1>
+                    <p id="updatedAt">Waiting for market data</p>
+                </div>
+                <div class="actions">
+                    <label class="field">
+                        <span>Top gainers</span>
+                        <select id="limitSelect">
+                            <option value="5">5 tokens</option>
+                            <option value="10" selected>10 tokens</option>
+                            <option value="15">15 tokens</option>
+                            <option value="20">20 tokens</option>
+                        </select>
+                    </label>
+                    <button id="refreshButton" type="button">Refresh</button>
+                </div>
+            </section>
+
+            <nav class="tabs" aria-label="Dashboard navigation">
+                <button class="tabButton active" type="button" data-tab="scannerTab">Tracker / Scanner</button>
+                <button class="tabButton" type="button" data-tab="botsTab">Bots</button>
+            </nav>
+
+            <section id="scannerTab" class="tabPanel active">
+                <section class="summary" aria-label="Signal summary">
+                    <article>
+                        <span>Good buys</span>
+                        <strong id="goodCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Watch</span>
+                        <strong id="watchCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Bad buys</span>
+                        <strong id="badCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Avg spread</span>
+                        <strong id="avgSpread">0.000%</strong>
+                    </article>
+                </section>
+
+                <section class="tablePanel" aria-label="Trending token signals">
+                    <div class="tableHeader">
+                        <div>
+                            <h2>Trending USDT Movers</h2>
+                            <p id="status" class="status">Loading market data...</p>
+                        </div>
+                        <div class="tableTools">
+                            <label class="field compactField inlineField">
+                                <span>Window</span>
+                                <select id="tableTimeframeSelect">
+                                    <option value="30m">30 min</option>
+                                    <option value="1h">1 hour</option>
+                                    <option value="3h">3 hours</option>
+                                    <option value="6h">6 hours</option>
+                                    <option value="12h">12 hours</option>
+                                    <option value="24h" selected>24 hours</option>
+                                    <option value="3d">3 days</option>
+                                    <option value="1w">1 week</option>
+                                    <option value="1mo">1 month</option>
+                                </select>
+                            </label>
+                            <span class="marketTag">Binance spot</span>
+                        </div>
+                    </div>
+                    <div class="tableWrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="rankCol">#</th>
+                                    <th>Token</th>
+                                    <th>Signal</th>
+                                    <th>Score</th>
+                                    <th class="numeric">Gain</th>
+                                    <th class="numeric">Pullback</th>
+                                    <th class="numeric">Spread</th>
+                                    <th class="numeric">Volume</th>
+                                    <th class="numeric">Entry</th>
+                                    <th>Factors</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tokenRows"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="decisionGuide" aria-label="Decision factors">
+                    <h2>Good vs bad buy factors</h2>
+                    <div class="guideGrid">
+                        <article>
+                            <h3>Momentum</h3>
+                            <p>24h gain should be strong, but not wildly overextended. This app starts with a 3-25% band.</p>
+                        </article>
+                        <article>
+                            <h3>Liquidity</h3>
+                            <p>High USDT volume and trade count matter because exits need to be easy when the signal fails.</p>
+                        </article>
+                        <article>
+                            <h3>Spread</h3>
+                            <p>A wide bid/ask spread is an instant hidden cost. Lower than 0.2% is the first safety filter.</p>
+                        </article>
+                        <article>
+                            <h3>Pullback</h3>
+                            <p>The current strategy likes a 2-5% dip from the recent 5m high, then signs of recovery.</p>
+                        </article>
+                        <article>
+                            <h3>Trend</h3>
+                            <p>Short-term 15m structure should still be rising. A dip in a broken trend is usually not a bargain.</p>
+                        </article>
+                        <article>
+                            <h3>Next factors</h3>
+                            <p>We should add RSI, candle volume spike, BTC market direction, news risk, funding, and stop distance.</p>
+                        </article>
+                    </div>
+                </section>
+            </section>
+
+            <section id="botsTab" class="tabPanel">
+                <section class="botPanel" aria-label="Paper trading bot">
+                    <div class="botHeader">
+                        <div>
+                            <h2>Paper Momentum Bot</h2>
+                            <p>One position max. Paper trading only. Entry uses 30m/1h momentum, $100k+ window volume, exits use take-profit, stop-loss, or time stop.</p>
+                        </div>
+                        <div class="botActions">
+                            <button id="botStartButton" type="button">Start Paper Bot</button>
+                            <button id="botStopButton" type="button" class="secondaryButton">Stop</button>
+                            <button id="botScanButton" type="button" class="secondaryButton">Scan Now</button>
+                            <button id="botCloseButton" type="button" class="dangerButton">Close Trade</button>
+                        </div>
+                    </div>
+                    <div class="botGrid">
+                        <article>
+                            <span>Status</span>
+                            <strong id="botStatus">Stopped</strong>
+                        </article>
+                        <article>
+                            <span>Mode</span>
+                            <strong>Paper</strong>
+                        </article>
+                        <article>
+                            <span>Position size</span>
+                            <strong id="botPositionSize">$100</strong>
+                        </article>
+                        <article>
+                            <span>Exit rules</span>
+                            <strong id="botExitRules">+2.5% / -1.5%</strong>
+                        </article>
+                    </div>
+                    <div class="tradeBox">
+                        <h3>Active Trade</h3>
+                        <div id="activeTrade" class="emptyTrade">No open paper trade.</div>
+                    </div>
+                    <div class="logBox">
+                        <h3>Bot Log</h3>
+                        <div id="botLogs" class="logs"></div>
+                    </div>
+                </section>
+            </section>
+        </main>
+
+        <script src="/app.js"></script>
+    </body>
+</html>
