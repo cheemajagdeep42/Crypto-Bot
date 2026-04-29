@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Crypto Signal Dashboard</title>
+        <link rel="stylesheet" href="/styles.css">
+    </head>
+    <body>
+        <main class="app">
+            <section class="toolbar" aria-label="Dashboard controls">
+                <div>
+                    <h1>Crypto Signal Dashboard</h1>
+                    <p id="updatedAt">Waiting for market data</p>
+                </div>
+                <div class="actions">
+                    <label class="field">
+                        <span>Top gainers</span>
+                        <select id="limitSelect">
+                            <option value="5">5 tokens</option>
+                            <option value="10" selected>10 tokens</option>
+                            <option value="15">15 tokens</option>
+                            <option value="20">20 tokens</option>
+                        </select>
+                    </label>
+                    <button id="refreshButton" type="button">Refresh</button>
+                </div>
+            </section>
+
+            <nav class="tabs" aria-label="Dashboard navigation">
+                <button class="tabButton active" type="button" data-tab="scannerTab">Tracker / Scanner</button>
+                <button class="tabButton" type="button" data-tab="botsTab">Bots</button>
+            </nav>
+
+            <section id="scannerTab" class="tabPanel active">
+                <section class="summary" aria-label="Signal summary">
+                    <article>
+                        <span>Good buys</span>
+                        <strong id="goodCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Watch</span>
+                        <strong id="watchCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Bad buys</span>
+                        <strong id="badCount">0</strong>
+                    </article>
+                    <article>
+                        <span>Avg spread</span>
+                        <strong id="avgSpread">0.000%</strong>
+                    </article>
+                </section>
+
+                <section class="tablePanel" aria-label="Trending token signals">
+                    <div class="tableHeader">
+                        <div class="tableTitleRow">
+                            <h2>Trending USDT Movers</h2>
+                            <p id="status" class="status">Loading market data...</p>
+                        </div>
+                        <div class="tableTools">
+                            <button id="infoButton" class="secondaryButton infoButton" type="button">Info</button>
+                            <label class="field compactField inlineField">
+                                <span>Window</span>
+                                <select id="tableTimeframeSelect">
+                                    <option value="30m">30 min</option>
+                                    <option value="1h">1 hour</option>
+                                    <option value="3h">3 hours</option>
+                                    <option value="6h">6 hours</option>
+                                    <option value="12h">12 hours</option>
+                                    <option value="24h" selected>24 hours</option>
+                                    <option value="3d">3 days</option>
+                                    <option value="1w">1 week</option>
+                                    <option value="1mo">1 month</option>
+                                </select>
+                            </label>
+                            <span class="marketTag">Binance spot</span>
+                        </div>
+                    </div>
+                    <div class="tableWrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="rankCol">#</th>
+                                    <th>Token</th>
+                                    <th>Signal</th>
+                                    <th>Score</th>
+                                    <th class="numeric">Gain</th>
+                                    <th class="numeric">Pullback</th>
+                                    <th class="numeric">Spread</th>
+                                    <th class="numeric">Volume</th>
+                                    <th class="numeric">Entry</th>
+                                    <th>Factors</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tokenRows"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </section>
+
+            <section id="botsTab" class="tabPanel">
+                <section class="botPanel" aria-label="Paper trading bot">
+                    <div class="botHeader">
+                        <div>
+                            <h2>Paper Momentum Bot</h2>
+                            <p>One position max. Paper trading only. Entry uses 30m/1h momentum, $100k+ window volume, exits use take-profit, stop-loss, or time stop.</p>
+                        </div>
+                    </div>
+
+                    <div class="botWorkspace">
+                        <aside class="botSidebar">
+                            <button class="botViewButton active" type="button" data-bot-view="overviewView">Overview</button>
+                            <button class="botViewButton" type="button" data-bot-view="runBotView">Run Bot</button>
+                            <button class="botViewButton" type="button" data-bot-view="historyView">History Logs</button>
+                        </aside>
+
+                        <div class="botViewContainer">
+                            <section id="overviewView" class="botViewPanel active">
+                                <div class="botGrid">
+                                    <article class="overviewCard">
+                                        <span>Status</span>
+                                        <strong id="botStatus">Stopped</strong>
+                                    </article>
+                                    <article class="overviewCard">
+                                        <span>Mode</span>
+                                        <strong>Paper</strong>
+                                    </article>
+                                    <article class="overviewCard">
+                                        <span>Position size</span>
+                                        <strong id="botPositionSize">$100</strong>
+                                    </article>
+                                    <article class="overviewCard exitRulesCard">
+                                        <span>Exit rules</span>
+                                        <strong id="botExitRules">+2.5% / -1.5%</strong>
+                                    </article>
+                                    <article class="overviewCard streamCard">
+                                        <span>Market stream</span>
+                                        <strong id="marketStreamStatus">Not loaded</strong>
+                                    </article>
+                                </div>
+                            </section>
+
+                            <section id="runBotView" class="botViewPanel">
+                                <div class="botActions">
+                                    <button id="botStartButton" type="button">Start Paper Bot</button>
+                                    <button id="botStopButton" type="button" class="secondaryButton">Stop</button>
+                                    <button id="botScanButton" type="button" class="secondaryButton">Scan Now</button>
+                                    <button id="botAutoModeButton" type="button" class="secondaryButton">Auto: On</button>
+                                    <button id="botCloseButton" type="button" class="dangerButton">Close Trade</button>
+                                </div>
+                                <div class="tradeBox">
+                                    <h3>Active Trade</h3>
+                                    <div id="activeTrade" class="emptyTrade">No open paper trade.</div>
+                                </div>
+                                <div class="configBox">
+                                    <h3>Strategy Config</h3>
+                                    <form id="botConfigForm" class="configGrid">
+                                        <label class="field">
+                                            <span>Position size ($)</span>
+                                            <input id="cfgPositionSize" type="number" min="10" step="10">
+                                        </label>
+                                        <label class="field">
+                                            <span>Scan interval (sec)</span>
+                                            <input id="cfgScanInterval" type="number" min="10" step="10">
+                                        </label>
+                                        <label class="field">
+                                            <span>Scan limit</span>
+                                            <input id="cfgScanLimit" type="number" min="1" max="20" step="1">
+                                        </label>
+                                        <label class="field">
+                                            <span>Timeframe</span>
+                                            <select id="cfgTimeframe">
+                                                <option value="30m">30m</option>
+                                                <option value="1h">1h</option>
+                                            </select>
+                                        </label>
+                                        <label class="field">
+                                            <span>TP steps (%)</span>
+                                            <input id="cfgTpSteps" type="text" placeholder="1.5,3,4.5,6">
+                                        </label>
+                                        <label class="field">
+                                            <span>TP sell fraction</span>
+                                            <input id="cfgTpFraction" type="number" min="0.05" max="1" step="0.05">
+                                        </label>
+                                        <label class="field">
+                                            <span>Dip steps (%)</span>
+                                            <input id="cfgDipSteps" type="text" placeholder="10,20,30">
+                                        </label>
+                                        <label class="field">
+                                            <span>Dip sell fractions</span>
+                                            <input id="cfgDipFractions" type="text" placeholder="0.25,0.5,1">
+                                        </label>
+                                        <label class="field">
+                                            <span>Break-even buffer (%)</span>
+                                            <input id="cfgBeBuffer" type="number" min="0" max="5" step="0.05">
+                                        </label>
+                                        <label class="field">
+                                            <span>Max loss (%)</span>
+                                            <input id="cfgStopLoss" type="number" min="0.2" max="10" step="0.1">
+                                        </label>
+                                        <label class="field">
+                                            <span>Max hold (mins)</span>
+                                            <input id="cfgMaxHold" type="number" min="1" max="480" step="1">
+                                        </label>
+                                        <div class="configActions">
+                                            <button id="saveConfigButton" type="submit">Save Config</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </section>
+
+                            <section id="historyView" class="botViewPanel">
+                                <div class="logBox">
+                                    <div class="logHeader">
+                                        <h3 id="botLogTitle">Trade Activity - All Tokens</h3>
+                                        <div class="logFilters">
+                                            <label class="field compactField inlineField">
+                                                <span>Time</span>
+                                                <select id="botLogTimeSelect">
+                                                    <option value="1">Last 1 hour</option>
+                                                    <option value="2">Last 2 hours</option>
+                                                    <option value="6">Last 6 hours</option>
+                                                    <option value="10">Last 10 hours</option>
+                                                    <option value="24" selected>Last 24 hours</option>
+                                                </select>
+                                            </label>
+                                            <label class="field compactField inlineField">
+                                                <span>Token</span>
+                                                <select id="botLogTokenSelect">
+                                                    <option value="all" selected>All tokens</option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div id="botLogs" class="logs"></div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+            </section>
+            </section>
+        </main>
+
+        <div id="infoModal" class="modalOverlay" aria-hidden="true">
+            <section class="modal" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+                <div class="modalHeader">
+                    <h2 id="infoTitle">Good vs Bad Buy Factors</h2>
+                    <button id="infoCloseButton" class="iconButton" type="button" aria-label="Close info">x</button>
+                </div>
+                <div class="guideGrid modalGrid">
+                    <article>
+                        <h3>Momentum</h3>
+                        <p>Recent gain should show strength without being wildly overextended. Momentum mode likes controlled moves, not exhausted pumps.</p>
+                    </article>
+                    <article>
+                        <h3>Liquidity</h3>
+                        <p>Volume helps entries and exits. Thin tokens can slip hard, especially when a stop loss needs to sell quickly.</p>
+                    </article>
+                    <article>
+                        <h3>Spread</h3>
+                        <p>The gap between bid and ask is an instant cost. Lower spread means the trade starts with less hidden loss.</p>
+                    </article>
+                    <article>
+                        <h3>Pullback</h3>
+                        <p>A pullback is the dip from a recent high. Small pullbacks can be okay for momentum; deeper pullbacks need recovery confirmation.</p>
+                    </article>
+                    <article>
+                        <h3>Trend</h3>
+                        <p>Short-term trend helps avoid buying a weak bounce. The bot currently checks whether 15m structure is rising.</p>
+                    </article>
+                    <article>
+                        <h3>Risk Controls</h3>
+                        <p>The paper bot uses one position at a time with take-profit, stop-loss, and time-stop exits.</p>
+                    </article>
+                </div>
+            </section>
+        </div>
+
+        <script src="/app.js"></script>
+    </body>
+</html>
