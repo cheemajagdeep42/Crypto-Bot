@@ -1,0 +1,894 @@
+:root {
+    color-scheme: dark;
+    --bg: #101214;
+    --panel: #191d21;
+    --panel-2: #20262b;
+    --text: #eef3f0;
+    --muted: #9aa7a1;
+    --line: #2c3438;
+    --green: #42d38b;
+    --yellow: #f3c74e;
+    --red: #ff6b6b;
+    --cyan: #5fc8ff;
+    --blue: #7aa7ff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.app {
+    width: min(1480px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 24px 0 40px;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 0 18px;
+}
+
+h1,
+h2,
+h3,
+p {
+    margin: 0;
+}
+
+h1 {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.toolbar p {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.app.botsActive .toolbar > div:first-child {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.app.botsActive .toolbar #updatedAt {
+    margin-top: 0;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.actions {
+    display: flex;
+    align-items: end;
+    gap: 10px;
+}
+
+.actions.hiddenActions {
+    display: none !important;
+}
+
+.app.botsActive .actions {
+    display: none !important;
+}
+
+.field {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.field input {
+    min-height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 0 10px;
+    font: inherit;
+}
+
+.compactField {
+    gap: 5px;
+}
+
+.inlineField {
+    align-items: center;
+    grid-template-columns: auto auto;
+}
+
+select,
+button {
+    min-height: 42px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+}
+
+select {
+    min-width: 132px;
+    padding: 0 34px 0 12px;
+}
+
+button {
+    cursor: pointer;
+    padding: 0 16px;
+    background: #d7f7e6;
+    color: #111614;
+    font-weight: 700;
+}
+
+button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.secondaryButton {
+    background: var(--panel-2);
+    color: var(--text);
+}
+
+.runningButton {
+    background: rgba(66, 211, 139, 0.2);
+    color: var(--green);
+}
+
+.dangerButton {
+    background: rgba(255, 107, 107, 0.18);
+    color: var(--red);
+}
+
+.summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.tabs {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.tabButton {
+    min-height: 40px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 0 14px;
+}
+
+.tabButton.active {
+    border-bottom-color: var(--green);
+    color: var(--text);
+}
+
+.tabPanel {
+    display: none;
+}
+
+.tabPanel.active {
+    display: block;
+}
+
+.summary article {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.summary span {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.summary strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 24px;
+}
+
+.tablePanel,
+.botPanel {
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+}
+
+.botPanel {
+    margin-bottom: 24px;
+    border-top: 0;
+    padding-top: 0;
+}
+
+.botHeader {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.botHeader h2 {
+    font-size: 18px;
+}
+
+.botHeader p {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.botActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-start;
+    margin-bottom: 12px;
+}
+
+.botGrid {
+    display: grid;
+    grid-template-columns: 0.95fr 0.95fr 0.95fr 1.6fr 1.15fr;
+    gap: 10px;
+}
+
+.exitRulesCard strong,
+.streamCard strong {
+    line-height: 1.25;
+    font-size: 10px;
+}
+
+.botWorkspace {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 16px;
+    margin-top: 14px;
+}
+
+.botSidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+}
+
+.botViewButton {
+    width: 100%;
+    min-height: 40px;
+    justify-content: flex-start;
+    background: var(--panel-2);
+    color: var(--text);
+}
+
+.botViewButton.active {
+    background: rgba(66, 211, 139, 0.2);
+    color: var(--green);
+    border-color: rgba(66, 211, 139, 0.5);
+}
+
+.botViewPanel {
+    display: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 12px;
+}
+
+.botViewPanel.active {
+    display: block;
+}
+
+.configGrid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.configActions {
+    display: flex;
+    align-items: end;
+}
+
+.configBox {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 12px;
+}
+
+.botGrid article,
+.tradeBox,
+.logBox {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 14px;
+}
+
+.botGrid span,
+.tradeBox span,
+.logLine span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.botGrid strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 18px;
+}
+
+.runningText,
+.positivePnl {
+    color: var(--green);
+}
+
+.negativePnl {
+    color: var(--red);
+}
+
+.tradeBox,
+.logBox,
+.historyBox {
+    margin-top: 0;
+}
+
+.tradeBox h3,
+.logBox h3,
+.historyBox h3 {
+    font-size: 15px;
+    margin-bottom: 10px;
+}
+
+.logHeader {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.logFilters {
+    display: flex;
+    gap: 10px;
+}
+
+.emptyTrade {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.activeTrade {
+    display: grid;
+    grid-template-columns: 1.4fr repeat(5, 1fr);
+    gap: 10px;
+}
+
+.activeTrade div {
+    display: grid;
+    gap: 5px;
+}
+
+.logs {
+    max-height: 440px;
+    min-height: 440px;
+    overflow: auto;
+    border: 0;
+    border-radius: 8px;
+    scrollbar-color: #56636b #15191d;
+    scrollbar-width: thin;
+}
+
+.logBox > .logs {
+    margin-top: 0;
+}
+
+.logBox .inlineField select {
+    min-height: 34px;
+    padding: 0 28px 0 10px;
+    min-width: 118px;
+    font-size: 12px;
+}
+
+.logs::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.logs::-webkit-scrollbar-track {
+    background: #15191d;
+}
+
+.logs::-webkit-scrollbar-thumb {
+    background: #56636b;
+    border: 2px solid #15191d;
+    border-radius: 999px;
+}
+
+.logTable {
+    min-width: 1480px;
+}
+
+.historyTable {
+    min-width: 1220px;
+}
+
+.logTableHeader,
+.logTableRow,
+.historyTableHeader,
+.historyTableRow {
+    display: grid;
+    gap: 10px;
+    align-items: start;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+}
+
+.logTableRow {
+    min-height: 42px;
+}
+
+.logTableHeader,
+.historyTableHeader {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #15191d;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.logTableHeader,
+.logTableRow {
+    grid-template-columns:
+        100px 110px 90px 90px 84px 70px 90px 90px 110px minmax(320px, 1fr) 90px;
+}
+
+.logTableHeader span:nth-child(10),
+.logTableRow span:nth-child(10) {
+    white-space: normal;
+    word-break: break-word;
+}
+
+.historyTableHeader,
+.historyTableRow {
+    grid-template-columns: 110px 110px 130px 170px 120px 130px 130px 130px 140px;
+}
+
+.logTableRow:last-child,
+.historyTableRow:last-child {
+    border-bottom: 0;
+}
+
+.logTableRow.warn {
+    color: var(--text);
+}
+
+.logTableRow.error {
+    color: var(--red);
+}
+
+.tableHeader {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.tableTools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tableHeader h2 {
+    font-size: 18px;
+}
+
+.tableTitleRow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.status {
+    min-height: 20px;
+    margin-top: 0;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.status.error {
+    color: var(--red);
+}
+
+.marketTag {
+    border: 1px solid rgba(95, 200, 255, 0.35);
+    border-radius: 999px;
+    color: var(--cyan);
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.infoButton {
+    min-height: 36px;
+    padding: 0 12px;
+}
+
+.tableWrap {
+    max-height: 520px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+    scrollbar-color: #56636b #15191d;
+    scrollbar-width: thin;
+}
+
+.tableWrap::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.tableWrap::-webkit-scrollbar-track {
+    background: #15191d;
+}
+
+.tableWrap::-webkit-scrollbar-thumb {
+    background: #56636b;
+    border: 2px solid #15191d;
+    border-radius: 999px;
+}
+
+.tableWrap::-webkit-scrollbar-thumb:hover {
+    background: #71808a;
+}
+
+table {
+    width: 100%;
+    min-width: 1260px;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+th,
+td {
+    padding: 13px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+    font-size: 14px;
+}
+
+th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #15191d;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0;
+}
+
+tbody tr {
+    background: var(--panel);
+    transition: background 140ms ease;
+}
+
+tbody tr:hover {
+    background: #1d2429;
+}
+
+tr:last-child td {
+    border-bottom: 0;
+}
+
+.rankCol {
+    width: 48px;
+    text-align: center;
+}
+
+.rank {
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    background: #12171a;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.token {
+    display: grid;
+    gap: 3px;
+}
+
+.token strong {
+    font-size: 16px;
+}
+
+.token span,
+.subtle {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.links {
+    display: flex;
+    gap: 8px;
+}
+
+.token a {
+    width: fit-content;
+    color: var(--cyan);
+    font-size: 12px;
+    text-decoration: none;
+}
+
+.token a:hover {
+    text-decoration: underline;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    min-width: 86px;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.badge.good_buy {
+    background: rgba(66, 211, 139, 0.2);
+    color: var(--green);
+}
+
+.badge.watch {
+    background: rgba(243, 199, 78, 0.18);
+    color: var(--yellow);
+}
+
+.badge.bad_buy {
+    background: rgba(255, 107, 107, 0.18);
+    color: var(--red);
+}
+
+.scoreCell {
+    display: grid;
+    gap: 6px;
+    width: 112px;
+}
+
+.scoreTrack {
+    width: 100%;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #2a3033;
+}
+
+.scoreTrack span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--yellow), var(--green));
+}
+
+.numeric {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.gainValue {
+    color: var(--green);
+    font-weight: 700;
+}
+
+.factors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 460px;
+}
+
+.chip {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.chip.good {
+    color: var(--green);
+    border-color: rgba(66, 211, 139, 0.5);
+}
+
+.chip.warn {
+    color: var(--yellow);
+    border-color: rgba(243, 199, 78, 0.5);
+}
+
+.chip.bad {
+    color: var(--red);
+    border-color: rgba(255, 107, 107, 0.5);
+}
+
+.guideGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.guideGrid article {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 14px;
+}
+
+.guideGrid h3 {
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+
+.guideGrid p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.modalOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.62);
+}
+
+.modalOverlay.active {
+    display: flex;
+}
+
+.modal {
+    width: min(980px, 100%);
+    max-height: min(720px, calc(100vh - 48px));
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    padding: 18px;
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.45);
+}
+
+.modalHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+.modalHeader h2 {
+    font-size: 20px;
+}
+
+.iconButton {
+    min-width: 36px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--panel-2);
+    color: var(--muted);
+}
+
+.modalGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+    .app {
+        width: min(100vw - 20px, 1480px);
+        padding-top: 16px;
+    }
+
+    .toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .tableHeader {
+        flex-direction: column;
+    }
+
+    .tableTools {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .inlineField {
+        align-items: start;
+        grid-template-columns: 1fr;
+    }
+
+    .actions,
+    .summary,
+    .guideGrid,
+    .botGrid,
+    .activeTrade,
+    .configGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .botWorkspace {
+        grid-template-columns: 1fr;
+    }
+
+    .botSidebar {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .actions {
+        display: grid;
+    }
+
+    .botHeader {
+        flex-direction: column;
+    }
+
+    .logHeader {
+        flex-direction: column;
+    }
+
+    .botActions {
+        display: grid;
+        justify-content: stretch;
+        width: 100%;
+    }
+}

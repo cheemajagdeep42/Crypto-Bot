@@ -1,0 +1,286 @@
+{
+  "status": "running",
+  "mode": "paper",
+  "config": {
+    "scanLimit": 20,
+    "timeframe": "1h",
+    "positionSizeUsdt": 100,
+    "takeProfitPercent": 2.5,
+    "partialTakeProfitPercent": 1.5,
+    "partialClosePercent": 0.4,
+    "trailingStopPercent": 1,
+    "breakEvenBufferPercent": 0.25,
+    "stopLossPercent": 1.5,
+    "maxHoldMinutes": 30,
+    "scanIntervalSeconds": 120
+  },
+  "activeTrade": {
+    "id": "MANTAUSDT-1777482931866",
+    "status": "open",
+    "symbol": "MANTAUSDT",
+    "baseAsset": "MANTA",
+    "entryPrice": 0.06914,
+    "quantity": 1446.3407578825572,
+    "positionSizeUsdt": 100,
+    "openedAt": "2026-04-29T17:15:31.866Z",
+    "currentPrice": 0.06937,
+    "pnlPercent": 0.3327,
+    "pnlUsdt": 0.3327,
+    "realizedPnlUsdt": 0,
+    "peakPrice": 0.06989,
+    "partialTaken": false
+  },
+  "tradeHistory": [
+    {
+      "id": "ZBTUSDT-1777481187321",
+      "status": "closed",
+      "symbol": "ZBTUSDT",
+      "baseAsset": "ZBT",
+      "entryPrice": 0.1889,
+      "quantity": 0,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T16:46:27.321Z",
+      "currentPrice": 0.186,
+      "pnlPercent": -1.5352,
+      "pnlUsdt": -1.5352,
+      "realizedPnlUsdt": -1.5352,
+      "peakPrice": 0.1914,
+      "partialTaken": false,
+      "exitPrice": 0.186,
+      "closedAt": "2026-04-29T17:03:54.410Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "DEXEUSDT-1777480561888",
+      "status": "closed",
+      "symbol": "DEXEUSDT",
+      "baseAsset": "DEXE",
+      "entryPrice": 12.107,
+      "quantity": 0,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T16:36:01.888Z",
+      "currentPrice": 11.924,
+      "pnlPercent": -1.5115,
+      "pnlUsdt": -1.5115,
+      "realizedPnlUsdt": -1.5115,
+      "peakPrice": 12.134,
+      "partialTaken": false,
+      "exitPrice": 11.924,
+      "closedAt": "2026-04-29T16:42:31.980Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "ZBTUSDT-1777479025272",
+      "status": "closed",
+      "symbol": "ZBTUSDT",
+      "baseAsset": "ZBT",
+      "entryPrice": 0.1914,
+      "quantity": 0,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T16:10:25.272Z",
+      "currentPrice": 0.1885,
+      "pnlPercent": -1.5152,
+      "pnlUsdt": -1.5152,
+      "realizedPnlUsdt": -1.5152,
+      "peakPrice": 0.1919,
+      "partialTaken": false,
+      "exitPrice": 0.1885,
+      "closedAt": "2026-04-29T16:15:11.687Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "ZBTUSDT-1777478816735",
+      "status": "closed",
+      "symbol": "ZBTUSDT",
+      "baseAsset": "ZBT",
+      "entryPrice": 0.1931,
+      "quantity": 0,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T16:06:56.735Z",
+      "currentPrice": 0.1902,
+      "pnlPercent": -1.5018,
+      "pnlUsdt": -1.5018,
+      "realizedPnlUsdt": -1.5018,
+      "peakPrice": 0.1936,
+      "partialTaken": false,
+      "exitPrice": 0.1902,
+      "closedAt": "2026-04-29T16:09:32.333Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "ZBTUSDT-1777477168223",
+      "status": "closed",
+      "symbol": "ZBTUSDT",
+      "baseAsset": "ZBT",
+      "entryPrice": 0.188,
+      "quantity": 0,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T15:39:28.223Z",
+      "currentPrice": 0.1851,
+      "pnlPercent": -1.5426,
+      "pnlUsdt": -1.5426,
+      "realizedPnlUsdt": -1.5426,
+      "peakPrice": 0.1891,
+      "partialTaken": false,
+      "exitPrice": 0.1851,
+      "closedAt": "2026-04-29T15:46:36.519Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "ZKPUSDT-1777475163929",
+      "status": "closed",
+      "symbol": "ZKPUSDT",
+      "baseAsset": "ZKP",
+      "entryPrice": 0.097,
+      "quantity": 1030.9278350515465,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T15:06:03.929Z",
+      "currentPrice": 0.0955,
+      "pnlPercent": -1.5464,
+      "pnlUsdt": -1.5464,
+      "exitPrice": 0.0955,
+      "closedAt": "2026-04-29T15:12:17.429Z",
+      "exitReason": "stop_loss"
+    },
+    {
+      "id": "ZKPUSDT-1777473586202",
+      "status": "closed",
+      "symbol": "ZKPUSDT",
+      "baseAsset": "ZKP",
+      "entryPrice": 0.0967,
+      "quantity": 1034.126163391934,
+      "positionSizeUsdt": 100,
+      "openedAt": "2026-04-29T14:39:46.202Z",
+      "currentPrice": 0.0967,
+      "pnlPercent": 0,
+      "pnlUsdt": 0,
+      "exitPrice": 0.0967,
+      "closedAt": "2026-04-29T15:05:58.261Z",
+      "exitReason": "manual"
+    }
+  ],
+  "logs": [
+    {
+      "time": "2026-04-29T17:15:31.872Z",
+      "level": "info",
+      "message": "Paper BUY MANTAUSDT at 0.06914 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T17:13:30.403Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T17:11:28.867Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T17:09:27.059Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T17:07:25.226Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T17:05:23.686Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T17:03:54.415Z",
+      "level": "warn",
+      "message": "Paper SELL ZBTUSDT at 0.186. Reason=stop_loss, PnL=-1.54%."
+    },
+    {
+      "time": "2026-04-29T16:55:22.122Z",
+      "level": "info",
+      "message": "Paper bot started. Live trading is disabled."
+    },
+    {
+      "time": "2026-04-29T16:46:27.332Z",
+      "level": "info",
+      "message": "Paper BUY ZBTUSDT at 0.1889 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T16:43:37.203Z",
+      "level": "info",
+      "message": "No momentum entry found. Waiting for next scan."
+    },
+    {
+      "time": "2026-04-29T16:42:31.993Z",
+      "level": "warn",
+      "message": "Paper SELL DEXEUSDT at 11.924. Reason=stop_loss, PnL=-1.51%."
+    },
+    {
+      "time": "2026-04-29T16:36:01.892Z",
+      "level": "info",
+      "message": "Paper BUY DEXEUSDT at 12.107 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T16:15:11.689Z",
+      "level": "warn",
+      "message": "Paper SELL ZBTUSDT at 0.1885. Reason=stop_loss, PnL=-1.52%."
+    },
+    {
+      "time": "2026-04-29T16:10:25.276Z",
+      "level": "info",
+      "message": "Paper BUY ZBTUSDT at 0.1914 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T16:09:32.335Z",
+      "level": "warn",
+      "message": "Paper SELL ZBTUSDT at 0.1902. Reason=stop_loss, PnL=-1.50%."
+    },
+    {
+      "time": "2026-04-29T16:06:56.743Z",
+      "level": "info",
+      "message": "Paper BUY ZBTUSDT at 0.1931 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T15:46:36.520Z",
+      "level": "warn",
+      "message": "Paper SELL ZBTUSDT at 0.1851. Reason=stop_loss, PnL=-1.54%."
+    },
+    {
+      "time": "2026-04-29T15:39:28.226Z",
+      "level": "info",
+      "message": "Paper BUY ZBTUSDT at 0.188 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T15:12:17.431Z",
+      "level": "warn",
+      "message": "Paper SELL ZKPUSDT at 0.0955. Reason=stop_loss, PnL=-1.55%."
+    },
+    {
+      "time": "2026-04-29T15:06:03.930Z",
+      "level": "info",
+      "message": "Paper BUY ZKPUSDT at 0.097 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    },
+    {
+      "time": "2026-04-29T15:05:58.262Z",
+      "level": "warn",
+      "message": "Paper SELL ZKPUSDT at 0.0967. Reason=manual, PnL=0.00%."
+    },
+    {
+      "time": "2026-04-29T15:05:42.176Z",
+      "level": "warn",
+      "message": "ZKPUSDT has no WebSocket price yet. Waiting for streamed price update."
+    },
+    {
+      "time": "2026-04-29T15:02:24.238Z",
+      "level": "warn",
+      "message": "ZKPUSDT has no WebSocket price yet. Waiting for streamed price update."
+    },
+    {
+      "time": "2026-04-29T14:39:46.206Z",
+      "level": "info",
+      "message": "Paper BUY ZKPUSDT at 0.0967 using $100. Momentum entry: 1-5% window gain, tradable liquidity, tight spread, and 15m trend up."
+    }
+  ],
+  "lastScanAt": "2026-04-29T17:25:31.960Z",
+  "nextScanAt": "2026-04-29T17:27:31.971Z"
+}

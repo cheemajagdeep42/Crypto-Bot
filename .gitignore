@@ -1,5 +1,15 @@
 node_modules/
+.next/
+out/
 dist/
+*.log
 .env
 .env.*
-*.log
+!.env.example
+.DS_Store
+Thumbs.db
+*.sqlite
+*.sqlite-journal
+*.db
+coverage/
+.turbo/

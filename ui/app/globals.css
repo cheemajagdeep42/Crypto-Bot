@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f6f8;
+  --panel: #ffffff;
+  --panel-muted: #f1f3f5;
+  --input-bg: #ffffff;
+  --input-fg: #111827;
+  --input-border: #d0d5dd;
+  --border: #e4e7ec;
+  --text: #111827;
+  --text-muted: #667085;
+  --brand: #111111;
+  --brand-soft: #eceef1;
+  --myFavColor: #e50914;
+}
+
+:root[data-theme="dark"] {
+  --background: #0d1117;
+  --panel: #111827;
+  --panel-muted: #0f172a;
+  --input-bg: #111827;
+  --input-fg: #e5e7eb;
+  --input-border: #334155;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --text-muted: #94a3b8;
+  --brand: #5b8cff;
+  --brand-soft: rgba(91, 140, 255, 0.15);
+  --myFavColor: #e50914;
+}
+
+:root.dark {
+  --background: #0d1117;
+  --panel: #111827;
+  --panel-muted: #0f172a;
+  --input-bg: #111827;
+  --input-fg: #e5e7eb;
+  --input-border: #334155;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --text-muted: #94a3b8;
+  --brand: #5b8cff;
+  --brand-soft: rgba(91, 140, 255, 0.15);
+  --myFavColor: #e50914;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+}
+
+button,
+[role="button"],
+a,
+summary,
+input[type="button"],
+input[type="submit"],
+input[type="reset"] {
+  cursor: pointer;
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23667085' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 0.55rem center;
+  background-repeat: no-repeat;
+  background-size: 14px 14px;
+  color: var(--input-fg);
+  border: 1px solid var(--input-border);
+  padding-right: 2rem;
+}
+
+select option {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
+}
