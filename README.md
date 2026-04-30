@@ -1,106 +1,77 @@
-# Top Gainer Scalper - Run Guide
+# Top Gainer Scalper
 
-This project now runs with:
+This project runs as:
 
-- `bff` as backend API server (default port `3001`)
-- `ui` as Next.js frontend (default port `3000`)
+- `bff` (backend API, default `3001`)
+- `ui` (Next.js frontend, default `3000`)
 
-## 1) Prerequisites
+## Prerequisites
 
-Install these first:
-
-- Node.js (recommended v22+)
-- npm (comes with Node.js)
-- PowerShell (already on Windows)
+- Node.js 22+
+- npm
+- PowerShell (Windows)
 
 Optional:
 
-- Python 3 (only if you want to use `start_bff.py`)
+- Python 3 (`start_bff.py`)
 
-## 2) Open the project folder
-
-From PowerShell:
-
-```powershell
-cd "c:\Users\cheem\OneDrive\Documents\New project\top-gainer-scalper"
-```
-
-## 3) Install dependencies
+## Install
 
 ```powershell
 cd bff
 npm install
 cd ..
-
 cd ui
 npm install
 cd ..
 ```
 
-## 4) Start the app (recommended: SQLite mode)
+## Run
 
-From project root, start backend first:
-
-### Option A - PowerShell starter
+Backend (recommended starter):
 
 ```powershell
 .\startBffServer.ps1
 ```
 
-### Option B - Python starter
+Alternative:
 
 ```powershell
 python start_bff.py
 ```
 
-Both default to SQLite storage. SQLite is embedded, so no DB server startup is required.
-
-Then start frontend in a second terminal:
+Frontend:
 
 ```powershell
 cd ui
 npm run dev
 ```
 
-## 5) Open in browser
+Open: `http://localhost:3000`
 
-Go to:
+## BFF tests and safety checks
 
-- `http://localhost:3000`
-
-## 6) Common run variants
-
-Run with JSON storage:
+From `bff` folder:
 
 ```powershell
-.\startBffServer.ps1 -Store json
+npm run check
+npm run test
 ```
 
-Run backend on custom port:
+Smoke suite (typecheck + tests in one command):
 
 ```powershell
-.\startBffServer.ps1 -Store sqlite -Port 3002
+npm run test:smoke
 ```
 
-If you change backend port, also update `ui/next.config.mjs` rewrite destination from `localhost:3001` to your chosen backend port.
+## Swagger / API docs
 
-Then open frontend:
+When BFF is running:
 
-- `http://localhost:3000`
+- OpenAPI JSON: `http://localhost:3001/api/openapi.json`
+- Swagger UI: `http://localhost:3001/api/docs`
 
-## 7) First-time SQLite migration
+## Notes
 
-When running SQLite mode for the first time:
-
-- Existing JSON bot state is imported automatically (if present).
-- SQLite DB file is created automatically.
-
-No manual migration step is needed.
-
-## 8) Troubleshooting
-
-- If `node:sqlite` errors appear, check Node version:
-  - `node -v` (use Node 22+)
-- If scripts are blocked in PowerShell, run once:
-  - `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-- If port is busy, use `-Port 3002`.
+- SQLite mode is embedded; no external DB server required.
+- If backend port changes, update `ui/next.config.mjs` rewrite target.

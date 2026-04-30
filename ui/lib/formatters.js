@@ -25,3 +25,19 @@ export function formatUsdtPair(symbol) {
   }
   return symbol;
 }
+
+/** `metric`: which gain field to show/sort — scan `window` = `gainPercent`. */
+export function getTokenGainSortValue(token, metric) {
+  if (!token) return null;
+  switch (metric) {
+    case "m5":
+      return token.fiveMinuteChangePercent;
+    case "m10":
+      return token.gainLoss10mPercent;
+    case "m30":
+      return token.gainLoss30mPercent;
+    case "window":
+    default:
+      return token.gainPercent;
+  }
+}

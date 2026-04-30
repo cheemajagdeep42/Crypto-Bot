@@ -33,6 +33,7 @@ This file tracks high-impact upgrades for the crypto scanner + paper bot.
 
 ## 5) UI and observability
 
+- [x] **Run Bot config split (UI):** Two accordions — **Bot Settings** (trade params + auto/save/run row) and **Scanner Settings** — inside one form so Save still sends the full config.
 - [ ] Strategy config panel (no-code param tuning from dashboard)
 - [ ] Per-trade timeline (entry, partials, exits, reasons)
 - [ ] Net PnL chart (gross vs fees)

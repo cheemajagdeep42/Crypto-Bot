@@ -1,9 +1,24 @@
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, CircleHelp } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, CircleHelp, Info } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
-import { formatGainLossPercent, formatMoney, formatPercent, formatUsdtPair } from "../../lib/formatters";
+import {
+  formatGainLossPercent,
+  formatMoney,
+  formatPercent,
+  formatUsdtPair,
+  getTokenGainSortValue
+} from "../../lib/formatters";
 import { useUiStore } from "../../stores/useUiStore";
+import { useBotStore } from "../../stores/useBotStore";
+import { useRunBotScannerFormStore } from "../../stores/useRunBotScannerFormStore";
+import { useRunBotTradeFormStore } from "../../stores/useRunBotTradeFormStore";
+import {
+  mergedConfigPayload,
+  scannerDraftsEqual,
+  tradeDraftsEqual
+} from "../../lib/runBotConfigSlices";
+import { cn } from "../../lib/utils";
 
 /** Matches `TimeframeKey` in bff scanner (for preview / table header). */
 const SCAN_TABLE_TIMEFRAMES = [
@@ -22,67 +37,140 @@ const SCAN_TABLE_TIMEFRAMES = [
   "1mo"
 ];
 
-function parseNumberList(text) {
-  return String(text ?? "")
-    .split(",")
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isFinite(item));
+/** Persisted venue preference; BFF scanner + prices use Binance until other adapters exist. */
+const MARKET_SOURCE_OPTIONS = [
+  { value: "binance", label: "Binance" },
+  { value: "coinbase", label: "Coinbase (planned)" },
+  { value: "kraken", label: "Kraken (planned)" },
+  { value: "bybit", label: "Bybit (planned)" },
+  {
+    value: "dexscreener",
+    label: "DexScreener (data only — no trading API)"
+  }
+];
+
+/** Upward = staged sells when total PnL % vs entry hits each threshold (same order as steps). */
+const UPWARD_TP_PRESETS = {
+  none: { steps: "none", uniform: 0.25, perStep: "" },
+  balanced: { steps: "1.5,3,4.5,6", uniform: 0.25, perStep: "" },
+  aggressive: { steps: "1,2,3,4", uniform: 0.25, perStep: "" },
+  conservative: { steps: "2,4,6,8", uniform: 0.25, perStep: "" },
+  /** 1%→10%, 2%→20%, … 5%→100% of *remaining* at each hit. */
+  progressive_5: { steps: "1,2,3,4,5", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,1" },
+  /** Multiplier presets: at m%, 2m%, ... 10m% sell 10%,20%,...,100% of remaining. */
+  multiplier_1: { steps: "1,2,3,4,5,6,7,8,9,10", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_2: { steps: "2,4,6,8,10,12,14,16,18,20", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_3: { steps: "3,6,9,12,15,18,21,24,27,30", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_4: { steps: "4,8,12,16,20,24,28,32,36,40", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_5: { steps: "5,10,15,20,25,30,35,40,45,50", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_8: { steps: "8,16,24,32,40,48,56,64,72,80", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" },
+  multiplier_10: { steps: "10,20,30,40,50,60,70,80,90,100", uniform: 0.25, perStep: "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1" }
+};
+
+/** Max affordable loss — must match BFF `STOP_LOSS_PERCENT_UI_CHOICES`. */
+const MAX_AFFORDABLE_LOSS_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20];
+
+/** First option (`off`) maps to `liquidityCheckRequired: false`; others match BFF `LiquidityGuardMode`. */
+const LIQUIDITY_GUARD_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "both", label: "Volume + MC" },
+  { value: "volume", label: "Volume only" },
+  { value: "mc", label: "MC only" }
+];
+
+/** Min market cap when liquidity + MC guard is not Off — must match BFF `MIN_MARKET_CAP_USD_CHOICES`. */
+const MIN_MARKET_CAP_OPTIONS = [
+  { value: 50_000, label: "$50k" },
+  { value: 100_000, label: "$100k" },
+  { value: 150_000, label: "$150k" },
+  { value: 200_000, label: "$200k" },
+  { value: 300_000, label: "$300k" },
+  { value: 400_000, label: "$400k" },
+  { value: 500_000, label: "$500k" },
+  { value: 700_000, label: "$700k" },
+  { value: 1_000_000, label: "$1M" },
+  { value: 1_000_001, label: "> $1M" }
+];
+
+/** Downward = retracement (peak−price)/(peak−entry)×100; each step sells % of *remaining*. */
+const DOWNWARD_RETRACE_PRESETS = {
+  none: { steps: "none", fracs: "" },
+  balanced: { steps: "50,60,70,80,90,100", fracs: "0.1,0.2,0.3,0.4,0.5,0.6" },
+  /** 10%→10%, 20%→20%, 30%→30%, 40%→40%, 100%→100% of remaining (5 steps). */
+  proportional_5: { steps: "10,20,30,40,100", fracs: "0.1,0.2,0.3,0.4,1" }
+};
+
+function detectUpwardPresetKey(tradeDraft) {
+  if (tradeDraft.takeProfitStepsPercent === "none") return "none";
+  const per = String(tradeDraft.takeProfitStepSellFractions ?? "").trim();
+  for (const [key, preset] of Object.entries(UPWARD_TP_PRESETS)) {
+    if (key === "none") continue;
+    if (preset.steps !== tradeDraft.takeProfitStepsPercent) continue;
+    if ((preset.perStep || "") !== per) continue;
+    if (!per && Number(tradeDraft.takeProfitStepSellFraction) !== preset.uniform) continue;
+    return key;
+  }
+  return "custom";
 }
 
-function formToPayload(form) {
-  return {
-    autoMode: Boolean(form.autoMode),
-    positionSizeUsdt: Number(form.positionSizeUsdt),
-    scanIntervalSeconds: Number(form.scanIntervalSeconds),
-    scanLimit: Number(form.scanLimit),
-    timeframe: form.timeframe,
-    liquidityGuard: form.liquidityGuard,
-    liquidityCheckRequired: Boolean(form.liquidityCheckRequired),
-    minFiveMinuteFlowUsdt: Number(form.minFiveMinuteFlowUsdt),
-    stopLossPercent: Number(form.stopLossPercent),
-    maxHoldMinutes: Number(form.maxHoldMinutes),
-    takeProfitStepsPercent: parseNumberList(form.takeProfitStepsPercent)
-  };
+function formatSettingsNumberList(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return "—";
+  return arr.map((n) => (Number.isFinite(Number(n)) ? String(n) : "?")).join(", ");
 }
 
-function botConfigToPayload(config) {
-  if (!config) return null;
-  return {
-    autoMode: Boolean(config.autoMode),
-    positionSizeUsdt: Number(config.positionSizeUsdt),
-    scanIntervalSeconds: Number(config.scanIntervalSeconds),
-    scanLimit: Number(config.scanLimit),
-    timeframe: config.timeframe,
-    liquidityGuard: config.liquidityGuard ?? "both",
-    liquidityCheckRequired: Boolean(config.liquidityCheckRequired),
-    minFiveMinuteFlowUsdt: Number(config.minFiveMinuteFlowUsdt ?? 30000),
-    stopLossPercent: Number(config.stopLossPercent),
-    maxHoldMinutes: Number(config.maxHoldMinutes),
-    takeProfitStepsPercent: Array.isArray(config.takeProfitStepsPercent)
-      ? config.takeProfitStepsPercent
-      : []
-  };
+function tradeSettingsAtOpenRows(settings) {
+  if (!settings || typeof settings !== "object") return [];
+  const guardLabel =
+    LIQUIDITY_GUARD_OPTIONS.find((o) => o.value === settings.liquidityGuard)?.label ?? String(
+      settings.liquidityGuard ?? "—"
+    );
+  const venueLabel =
+    MARKET_SOURCE_OPTIONS.find((o) => o.value === settings.marketSource)?.label ?? String(
+      settings.marketSource ?? "—"
+    );
+  return [
+    ["Venue", venueLabel],
+    ["Auto mode", settings.autoMode ? "On" : "Off"],
+    ["Bet amount (USDT)", settings.positionSizeUsdt != null ? `$${Number(settings.positionSizeUsdt)}` : "—"],
+    ["Max hold (min)", settings.maxHoldMinutes != null ? String(settings.maxHoldMinutes) : "—"],
+    ["Stop loss %", settings.stopLossPercent != null ? `${settings.stopLossPercent}%` : "—"],
+    ["Take profit steps %", formatSettingsNumberList(settings.takeProfitStepsPercent)],
+    [
+      "TP sell fraction",
+      settings.takeProfitStepSellFractions?.length
+        ? formatSettingsNumberList(settings.takeProfitStepSellFractions)
+        : settings.takeProfitStepSellFraction != null
+          ? String(settings.takeProfitStepSellFraction)
+          : "—"
+    ],
+    ["Dip steps %", formatSettingsNumberList(settings.dipStepsPercent)],
+    ["Dip sell fractions", formatSettingsNumberList(settings.dipStepSellFractions)],
+    ["Retracement dip steps %", formatSettingsNumberList(settings.dipRetracementStepsPercent)],
+    ["Retracement sell fractions", formatSettingsNumberList(settings.dipRetracementSellFractions)],
+    [
+      "Min MFE for retracement dip %",
+      settings.minDipRetracementMfeBasisPercent != null ? String(settings.minDipRetracementMfeBasisPercent) : "—"
+    ],
+    ["Scanner timeframe", settings.timeframe ?? "—"],
+    ["Scan limit", settings.scanLimit != null ? String(settings.scanLimit) : "—"],
+    ["Scan interval (s)", settings.scanIntervalSeconds != null ? String(settings.scanIntervalSeconds) : "—"],
+    ["Liquidity + MC guard", settings.liquidityCheckRequired ? "On" : "Off"],
+    ["Guard mode", guardLabel],
+    ["Min 5m volume (USDT)", settings.minFiveMinuteFlowUsdt != null ? formatMoney(settings.minFiveMinuteFlowUsdt) : "—"],
+    ["Min market cap (USD)", settings.minMarketCapUsd != null ? formatMoney(settings.minMarketCapUsd) : "—"]
+  ];
 }
 
-/** Maps last-saved config (payload shape) back to form state for Reset Config. */
-function payloadToFormFields(payload) {
-  if (!payload) return null;
-  const steps = payload.takeProfitStepsPercent;
-  const stepsStr =
-    Array.isArray(steps) && steps.length > 0 ? steps.join(",") : "1.5,3,4.5,6";
-  return {
-    autoMode: payload.autoMode,
-    positionSizeUsdt: payload.positionSizeUsdt,
-    scanIntervalSeconds: payload.scanIntervalSeconds,
-    scanLimit: payload.scanLimit,
-    timeframe: payload.timeframe,
-    liquidityGuard: payload.liquidityGuard ?? "both",
-    liquidityCheckRequired: payload.liquidityCheckRequired,
-    minFiveMinuteFlowUsdt: payload.minFiveMinuteFlowUsdt,
-    stopLossPercent: payload.stopLossPercent,
-    maxHoldMinutes: payload.maxHoldMinutes,
-    takeProfitStepsPercent: stepsStr
-  };
+function detectDownwardPresetKey(tradeDraft) {
+  if (tradeDraft.dipRetracementSteps === "none") return "none";
+  const fr = String(tradeDraft.dipRetracementSellFractions ?? "").trim();
+  for (const [key, preset] of Object.entries(DOWNWARD_RETRACE_PRESETS)) {
+    if (key === "none") continue;
+    if (preset.steps !== tradeDraft.dipRetracementSteps) continue;
+    if (preset.fracs !== fr) continue;
+    return key;
+  }
+  return "custom";
 }
 
 function FieldLabel({ id, label, help, activeTip, onToggleTip }) {
@@ -111,7 +199,16 @@ function FieldLabel({ id, label, help, activeTip, onToggleTip }) {
   );
 }
 
-function AccordionSection({ title, titleMeta, isOpen, onToggle, headerRight, headerRightWhenCollapsed, children }) {
+function AccordionSection({
+  title,
+  titleMeta,
+  isOpen,
+  onToggle,
+  headerRight,
+  headerRightWhenCollapsed,
+  children,
+  contentClassName
+}) {
   return (
     <section className="rounded-lg border border-[var(--border)]">
       <div
@@ -146,7 +243,7 @@ function AccordionSection({ title, titleMeta, isOpen, onToggle, headerRight, hea
           </button>
         </div>
       </div>
-      {isOpen ? <div className="px-3 pb-3">{children}</div> : null}
+      {isOpen ? <div className={cn("px-3 pb-3", contentClassName)}>{children}</div> : null}
     </section>
   );
 }
@@ -156,18 +253,22 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
   const activeTradeSectionRef = useRef(null);
   const prevHadActiveTradeRef = useRef(false);
   const [activeTip, setActiveTip] = useState(null);
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isBotSettingsOpen, setIsBotSettingsOpen] = useState(false);
+  const [isScannerSettingsOpen, setIsScannerSettingsOpen] = useState(true);
   const [isScanOpen, setIsScanOpen] = useState(false);
   const [isTradeOpen, setIsTradeOpen] = useState(false);
   const [scanLimitFilter, setScanLimitFilter] = useState(20);
-  const [scanTimeframeFilter, setScanTimeframeFilter] = useState("24h");
+  /** Default matches saved scanner window (`scanDraft.timeframe`); synced when config loads or you change Scanner timeframe. */
+  const [scanTimeframeFilter, setScanTimeframeFilter] = useState("1h");
   const [volumeSortDirection, setVolumeSortDirection] = useState(null);
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  /** Gain/Loss column follows selected scan timeframe filter. */
+  const gainSortMetric = "window";
+  const [gainSortDirection, setGainSortDirection] = useState(null);
+  const [isSavingScannerConfig, setIsSavingScannerConfig] = useState(false);
+  const [isSavingTradeConfig, setIsSavingTradeConfig] = useState(false);
   const [isRunBotRequestPending, setIsRunBotRequestPending] = useState(false);
-  const [isEditingDraft, setIsEditingDraft] = useState(false);
-  const [baselineSnapshot, setBaselineSnapshot] = useState(null);
-  const initialConfigSnapshotRef = useRef(null);
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
+  const [isTradeSettingsModalOpen, setIsTradeSettingsModalOpen] = useState(false);
   const [isStopModalOpen, setIsStopModalOpen] = useState(false);
   const [isStopActionPending, setIsStopActionPending] = useState(false);
   const [stopConfirmMode, setStopConfirmMode] = useState(null);
@@ -177,45 +278,47 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
   const [showAutoStoppedScan, setShowAutoStoppedScan] = useState(false);
   const prevAutoModeRef = useRef(undefined);
   const prevBotStatusRef = useRef(botState?.status);
-  const [form, setForm] = useState({
-    autoMode: false,
-    positionSizeUsdt: 5,
-    scanIntervalSeconds: 120,
-    scanLimit: 20,
-    timeframe: "1h",
-    liquidityGuard: "both",
-    liquidityCheckRequired: false,
-    minFiveMinuteFlowUsdt: 30000,
-    stopLossPercent: 1.5,
-    maxHoldMinutes: 30,
-    takeProfitStepsPercent: "1.5,3,4.5,6"
-  });
+
+  const scanDraft = useRunBotScannerFormStore((s) => s.draft);
+  const patchScanDraft = useRunBotScannerFormStore((s) => s.patchDraft);
+  const hasScannerDirty = useRunBotScannerFormStore((s) => !scannerDraftsEqual(s.draft, s.baseline));
+
+  const tradeDraft = useRunBotTradeFormStore((s) => s.draft);
+  const patchTradeDraft = useRunBotTradeFormStore((s) => s.patchDraft);
+  const hasTradeDirty = useRunBotTradeFormStore((s) => !tradeDraftsEqual(s.draft, s.baseline));
 
   useEffect(() => {
-    if (!botState?.config) return;
-    if (isEditingDraft || isSavingConfig) return;
-    const incomingBaseline = botConfigToPayload(botState.config);
-    setBaselineSnapshot(incomingBaseline);
-    if (!initialConfigSnapshotRef.current) {
-      initialConfigSnapshotRef.current = incomingBaseline;
+    if (!botState?.config || isSavingScannerConfig) return;
+    useRunBotScannerFormStore.getState().syncFromServerIfNotDirty(botState.config);
+  }, [botState?.config, isSavingScannerConfig]);
+
+  useEffect(() => {
+    if (!botState?.config || isSavingTradeConfig) return;
+    useRunBotTradeFormStore.getState().syncFromServerIfNotDirty(botState.config);
+  }, [botState?.config, isSavingTradeConfig]);
+
+  /** After a scan, keep the header dropdown aligned with the timeframe the server used (tokens + gain column). */
+  useEffect(() => {
+    if (!botState?.lastScanAt || !botState?.lastScanTimeframe) return;
+    const tf = botState.lastScanTimeframe;
+    if (SCAN_TABLE_TIMEFRAMES.includes(tf)) {
+      setScanTimeframeFilter(tf);
     }
-    setForm((prev) => ({
-      positionSizeUsdt: botState.config.positionSizeUsdt,
-      autoMode: typeof botState.config.autoMode === "boolean" ? botState.config.autoMode : false,
-      scanIntervalSeconds: botState.config.scanIntervalSeconds,
-      scanLimit: botState.config.scanLimit,
-      timeframe: botState.config.timeframe,
-      liquidityGuard: botState.config.liquidityGuard ?? "both",
-      liquidityCheckRequired:
-        typeof botState.config.liquidityCheckRequired === "boolean"
-          ? botState.config.liquidityCheckRequired
-          : prev.liquidityCheckRequired,
-      minFiveMinuteFlowUsdt: botState.config.minFiveMinuteFlowUsdt ?? 30000,
-      stopLossPercent: botState.config.stopLossPercent,
-      maxHoldMinutes: botState.config.maxHoldMinutes,
-      takeProfitStepsPercent: (botState.config.takeProfitStepsPercent ?? []).join(",")
-    }));
-  }, [botState, isEditingDraft, isSavingConfig]);
+  }, [botState?.lastScanAt, botState?.lastScanTimeframe]);
+
+  useEffect(() => {
+    if (scanDraft.timeframe === "30m" || scanDraft.timeframe === "1h") {
+      setScanTimeframeFilter(scanDraft.timeframe);
+    }
+  }, [scanDraft.timeframe]);
+
+  useEffect(() => {
+    if (botState?.lastScanAt) return;
+    const tf = botState?.config?.timeframe;
+    if (tf && SCAN_TABLE_TIMEFRAMES.includes(tf)) {
+      setScanTimeframeFilter(tf);
+    }
+  }, [botState?.lastScanAt, botState?.config?.timeframe]);
 
   useEffect(() => {
     if (!activeTip) return undefined;
@@ -235,11 +338,11 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
   }, [activeTip]);
 
   useEffect(() => {
-    if (form.autoMode && !prevAutoModeRef.current) {
+    if (tradeDraft.autoMode && !prevAutoModeRef.current) {
       setShowAutoStoppedScan(false);
     }
-    prevAutoModeRef.current = form.autoMode;
-  }, [form.autoMode]);
+    prevAutoModeRef.current = tradeDraft.autoMode;
+  }, [tradeDraft.autoMode]);
 
   useEffect(() => {
     const prev = prevBotStatusRef.current;
@@ -250,14 +353,20 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
     prevBotStatusRef.current = cur;
   }, [botState?.status]);
 
-  const configPayload = () => formToPayload(form);
+  const configPayload = () =>
+    mergedConfigPayload(botState?.config, useRunBotScannerFormStore.getState().draft, useRunBotTradeFormStore.getState().draft);
 
   const handleStart = async () => {
     setIsRunBotRequestPending(true);
     try {
       await onSaveConfig(configPayload());
+      const cfg = useBotStore.getState().botState?.config;
+      if (cfg) {
+        useRunBotScannerFormStore.getState().hydrateFromConfig(cfg);
+        useRunBotTradeFormStore.getState().hydrateFromConfig(cfg);
+      }
       await onAction("start");
-      if (!form.autoMode) {
+      if (!useRunBotTradeFormStore.getState().draft.autoMode) {
         await onAction("previewScan", { limit: scanLimitFilter, timeframe: scanTimeframeFilter });
       }
     } finally {
@@ -277,48 +386,92 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
     }
   };
 
-  const handleSave = async () => {
-    setIsSavingConfig(true);
+  const handleSaveScanner = async () => {
+    setIsSavingScannerConfig(true);
     try {
-      await onSaveConfig(configPayload());
-      setIsEditingDraft(false);
+      await onSaveConfig(useRunBotScannerFormStore.getState().getPayload());
+      const cfg = useBotStore.getState().botState?.config;
+      if (cfg) useRunBotScannerFormStore.getState().hydrateFromConfig(cfg);
     } finally {
-      setIsSavingConfig(false);
+      setIsSavingScannerConfig(false);
     }
   };
 
-  const handleResetConfig = () => {
-    const base = initialConfigSnapshotRef.current ?? baselineSnapshot ?? botConfigToPayload(botState?.config);
-    const fields = payloadToFormFields(base);
-    if (!fields) return;
-    setForm((prev) => ({ ...prev, ...fields }));
-    setIsEditingDraft(false);
+  const handleSaveTrade = async () => {
+    setIsSavingTradeConfig(true);
+    try {
+      await onSaveConfig(useRunBotTradeFormStore.getState().getPayload());
+      const cfg = useBotStore.getState().botState?.config;
+      if (cfg) useRunBotTradeFormStore.getState().hydrateFromConfig(cfg);
+    } finally {
+      setIsSavingTradeConfig(false);
+    }
   };
 
-  const handleMCToggle = () => {
-    const nextValue = !form.liquidityCheckRequired;
-    setIsEditingDraft(true);
-    setForm((prev) => ({ ...prev, liquidityCheckRequired: nextValue }));
+  const handleResetScannerConfig = () => {
+    useRunBotScannerFormStore.getState().resetDraftToBaseline();
   };
 
-  const baselinePayload = baselineSnapshot ?? botConfigToPayload(botState?.config);
+  const handleResetTradeConfig = () => {
+    useRunBotTradeFormStore.getState().resetDraftToBaseline();
+  };
 
-  const hasDirtyConfigChanges = baselinePayload
-    ? JSON.stringify(configPayload()) !== JSON.stringify(baselinePayload)
-    : false;
+  const upwardPresetKey = detectUpwardPresetKey(tradeDraft);
+  const upwardIsCustom = upwardPresetKey === "custom";
+  const downwardPresetKey = detectDownwardPresetKey(tradeDraft);
+  const downwardIsCustom = downwardPresetKey === "custom";
+
   const botRunning = botState?.status === "running";
-  const autoStopped = Boolean(form.autoMode && botState && !botRunning);
+  const autoStopped = Boolean(tradeDraft.autoMode && botState && !botRunning);
   const scanTableLoading = previewScanLoading || isRunBotRequestPending;
   const showAutoScanInUi =
-    !form.autoMode || botRunning || showAutoStoppedScan || previewScanLoading || isRunBotRequestPending;
+    !tradeDraft.autoMode || botRunning || showAutoStoppedScan || previewScanLoading || isRunBotRequestPending;
+  const lastScanAt = botState?.lastScanAt;
+  const scanMetaFromServer =
+    autoStopped && !showAutoStoppedScan && !previewScanLoading && !isRunBotRequestPending;
   const scannedTokens = botState?.lastScanTokens ?? [];
   const scannedTokensForUi = showAutoScanInUi ? scannedTokens : [];
-  const sortedScannedTokens = [...scannedTokensForUi].sort((a, b) => {
-    if (!volumeSortDirection) return 0;
-    const aVolume = typeof a.quoteVolume === "number" ? a.quoteVolume : -Infinity;
-    const bVolume = typeof b.quoteVolume === "number" ? b.quoteVolume : -Infinity;
-    return volumeSortDirection === "asc" ? aVolume - bVolume : bVolume - aVolume;
-  });
+  const effectiveScanTimeframe =
+    tradeDraft.autoMode &&
+    botState &&
+    !scanMetaFromServer &&
+    (botState.lastScanTimeframe || botState.config?.timeframe)
+      ? botState.lastScanTimeframe ?? botState.config?.timeframe ?? scanTimeframeFilter
+      : scanTimeframeFilter;
+  const getDisplayedVolume = (token) => {
+    if (effectiveScanTimeframe === "5m") {
+      return typeof token?.fiveMinuteQuoteVolumeUsdt === "number" ? token.fiveMinuteQuoteVolumeUsdt : null;
+    }
+    return typeof token?.quoteVolume === "number" ? token.quoteVolume : null;
+  };
+  const sortedScannedTokens = useMemo(() => {
+    const toNum = (v) =>
+      v != null && Number.isFinite(Number(v)) ? Number(v) : Number.NEGATIVE_INFINITY;
+    return [...scannedTokensForUi].sort((a, b) => {
+      if (gainSortDirection) {
+        const cmp =
+          gainSortDirection === "asc"
+            ? toNum(getTokenGainSortValue(a, gainSortMetric)) -
+              toNum(getTokenGainSortValue(b, gainSortMetric))
+            : toNum(getTokenGainSortValue(b, gainSortMetric)) -
+              toNum(getTokenGainSortValue(a, gainSortMetric));
+        if (cmp !== 0) return cmp;
+      }
+      if (volumeSortDirection) {
+        const aVolume = Number(getDisplayedVolume(a));
+        const bVolume = Number(getDisplayedVolume(b));
+        const aSafe = Number.isFinite(aVolume) ? aVolume : Number.NEGATIVE_INFINITY;
+        const bSafe = Number.isFinite(bVolume) ? bVolume : Number.NEGATIVE_INFINITY;
+        return volumeSortDirection === "asc" ? aSafe - bSafe : bSafe - aSafe;
+      }
+      return 0;
+    });
+  }, [
+    scannedTokensForUi,
+    gainSortDirection,
+    volumeSortDirection,
+    effectiveScanTimeframe
+  ]);
   const activeTrade = botState?.activeTrade;
   const formatDateTime = (value) => {
     if (!value) return "n/a";
@@ -336,6 +489,13 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
   const tradeWhyBought = activeTrade?.entryReason ?? "Momentum entry based on scan factors.";
   const toggleVolumeSort = () => {
     setVolumeSortDirection((prev) => {
+      if (prev === null) return "desc";
+      if (prev === "desc") return "asc";
+      return null;
+    });
+  };
+  const toggleGainSort = () => {
+    setGainSortDirection((prev) => {
       if (prev === null) return "desc";
       if (prev === "desc") return "asc";
       return null;
@@ -359,9 +519,15 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
     return `${diffDays} day${diffDays === 1 ? "" : "s"} back`;
   };
   const formatTimeframeForHeader = (timeframe) => timeframe || "window";
-  const lastScanAt = botState?.lastScanAt;
-  const scanMetaFromServer =
-    autoStopped && !showAutoStoppedScan && !previewScanLoading && !isRunBotRequestPending;
+  const formatUsdNoDecimals = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "n/a";
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0
+    }).format(numeric);
+  };
   const scanStatusMeta = previewScanLoading
     ? "Scanning…"
     : isRunBotRequestPending
@@ -372,22 +538,15 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
         ? `Last scanned ${formatLastScannedAgo(lastScanAt)}`
         : "No scan yet";
   const scanWindowLabel =
-    form.autoMode &&
+    tradeDraft.autoMode &&
     botState &&
     !scanMetaFromServer &&
     (botState.lastScanTimeframe || botState.config?.timeframe)
       ? botState.lastScanTimeframe ?? botState.config?.timeframe
       : null;
-  const scannedTokensTitleMeta = [form.autoMode ? "Auto mode" : "Manual", scanWindowLabel, scanStatusMeta]
+  const scannedTokensTitleMeta = [tradeDraft.autoMode ? "Auto mode" : "Manual", scanWindowLabel, scanStatusMeta]
     .filter(Boolean)
     .join(" · ");
-  const effectiveScanTimeframe =
-    form.autoMode &&
-    botState &&
-    !scanMetaFromServer &&
-    (botState.lastScanTimeframe || botState.config?.timeframe)
-      ? botState.lastScanTimeframe ?? botState.config?.timeframe ?? scanTimeframeFilter
-      : scanTimeframeFilter;
   const formatElapsed = (openedAt) => {
     if (!openedAt) return "n/a";
     const opened = new Date(openedAt).getTime();
@@ -415,27 +574,36 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
     if (!activeTrade) return;
     await onAction("extendTradeTime", { extendByMinutes: Number(extendMinutes) });
   };
+  const triggerHeaderAutoScan = (nextLimit, nextTimeframe) => {
+    setShowAutoStoppedScan(true);
+    void onAction("previewScan", { limit: Number(nextLimit), timeframe: nextTimeframe });
+  };
   const pnlClass =
     typeof activeTrade?.pnlPercent === "number"
       ? activeTrade.pnlPercent >= 0
         ? "text-emerald-500"
         : "text-[#e50914]"
       : "text-[var(--text)]";
+  const soldPercent = (() => {
+    if (!activeTrade) return null;
+    const remainingQty = Number(activeTrade.quantity);
+    const soldQty = Array.isArray(activeTrade.partialFills)
+      ? activeTrade.partialFills.reduce((sum, fill) => {
+          const q = Number(fill?.quantitySold);
+          return Number.isFinite(q) && q > 0 ? sum + q : sum;
+        }, 0)
+      : 0;
+    if (!Number.isFinite(remainingQty) || remainingQty < 0) return null;
+    const initialQty = remainingQty + soldQty;
+    if (!Number.isFinite(initialQty) || initialQty <= 0) return 0;
+    return Math.max(0, Math.min(100, (soldQty / initialQty) * 100));
+  })();
   const collapsedPnlClass =
     typeof activeTrade?.pnlPercent === "number"
       ? activeTrade.pnlPercent >= 0
         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
         : "border-[#e50914]/30 bg-[#e50914]/10 text-[#e50914]"
       : "border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-muted)]";
-
-  const botConfigReady = Boolean(botState?.config);
-  const savedConfigAutoMode = botState?.config?.autoMode === true;
-
-  useEffect(() => {
-    if (!botConfigReady) return;
-    if (form.autoMode || savedConfigAutoMode) return;
-    void onAction("previewScan", { limit: scanLimitFilter, timeframe: scanTimeframeFilter });
-  }, [botConfigReady, savedConfigAutoMode, form.autoMode, scanLimitFilter, scanTimeframeFilter, onAction]);
 
   useEffect(() => {
     const tick = () => setNowTs(Date.now());
@@ -466,32 +634,31 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
     <Card className="min-h-[calc(100vh-180px)] bg-[var(--panel)]">
       <CardContent className="flex h-full flex-col justify-between space-y-4 pt-5 text-sm text-[var(--text-muted)]">
         <div className="space-y-4">
-          <AccordionSection
-            title="Strategy Config"
-            isOpen={isConfigOpen}
-            onToggle={() => setIsConfigOpen((prev) => !prev)}
-          >
-          <form
-            className="pt-2"
-            onChangeCapture={() => setIsEditingDraft(true)}
-          >
-            <div className="grid gap-3 md:grid-cols-3">
+          <form className="space-y-4 pt-2">
+            <AccordionSection
+              title="Scanner Settings"
+              isOpen={isScannerSettingsOpen}
+              onToggle={() => setIsScannerSettingsOpen((prev) => !prev)}
+              contentClassName="pb-0"
+            >
+              <div>
+              <div className="grid gap-3 md:grid-cols-3">
               <label className="grid gap-1">
                 <FieldLabel
-                  id="amount"
-                  label="Amount (USDT)"
-                  help="Position size used per paper trade. Limited to safer presets for now."
+                  id="marketSource"
+                  label="Market source"
+                  help="Target exchange or data provider for this bot profile. Today only Binance spot data is wired (scanner + prices). Other options are stored for the roadmap. DexScreener publishes a public API for pair stats, volume, and discovery — it does not execute trades or replace a CEX/broker API."
                   activeTip={activeTip}
                   onToggleTip={setActiveTip}
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.positionSizeUsdt}
-                  onChange={(event) => setForm((prev) => ({ ...prev, positionSizeUsdt: event.target.value }))}
+                  value={scanDraft.marketSource}
+                  onChange={(event) => patchScanDraft({ marketSource: event.target.value })}
                 >
-                  {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50].map((value) => (
-                    <option key={value} value={value}>
-                      ${value}
+                  {MARKET_SOURCE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
                     </option>
                   ))}
                 </select>
@@ -506,8 +673,8 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.scanIntervalSeconds}
-                  onChange={(event) => setForm((prev) => ({ ...prev, scanIntervalSeconds: event.target.value }))}
+                  value={scanDraft.scanIntervalSeconds}
+                  onChange={(event) => patchScanDraft({ scanIntervalSeconds: event.target.value })}
                 >
                   {[30, 60, 120, 180, 300].map((value) => (
                     <option key={value} value={value}>
@@ -526,14 +693,31 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.scanLimit}
-                  onChange={(event) => setForm((prev) => ({ ...prev, scanLimit: event.target.value }))}
+                  value={scanDraft.scanLimit}
+                  onChange={(event) => patchScanDraft({ scanLimit: event.target.value })}
                 >
                   {[5, 10, 15, 20].map((value) => (
                     <option key={value} value={value}>
                       Top {value}
                     </option>
                   ))}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <FieldLabel
+                  id="scannerTimeframe"
+                  label="Scanner timeframe (saved)"
+                  help="Rolling window for scanner gain/volume ranking and auto scans (BFF: 30m or 1h). The Scanned Tokens timeframe dropdown is set to this when you load config or change this field; use Refresh Scan to fetch. Entry checks still use 5m micro-trend separately."
+                  activeTip={activeTip}
+                  onToggleTip={setActiveTip}
+                />
+                <select
+                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  value={scanDraft.timeframe}
+                  onChange={(event) => patchScanDraft({ timeframe: event.target.value })}
+                >
+                  <option value="30m">30m</option>
+                  <option value="1h">1h</option>
                 </select>
               </label>
               <label className="grid gap-1">
@@ -555,30 +739,45 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                 <FieldLabel
                   id="liquidityGuard"
                   label="Liquidity + MC Guard"
-                  help="Fixed to BOTH checks: token must satisfy minimum 5m volume threshold and minimum market cap."
-                  activeTip={activeTip}
-                  onToggleTip={setActiveTip}
-                />
-                <input
-                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled
-                  value="Both (Volume + Market Cap)"
-                  readOnly
-                />
-              </label>
-              <label className="grid gap-1">
-                <FieldLabel
-                  id="min5mFlow"
-                  label="Min 5m Volume"
-                  help="Minimum quote volume required in the latest 5m candle when Volume guard is selected."
+                  help="**Off** — no extra volume/MC gates for momentum entry (Min 5m / Min MC are ignored for entry). **Volume + MC** / **Volume only** / **MC only** — turn gates on and choose which apply. Scan list may still apply a 5m volume prefilter on Binance. Binance MC uses a small static cap table (unknown = fail); Dex uses pair marketCap / fdv."
                   activeTip={activeTip}
                   onToggleTip={setActiveTip}
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.minFiveMinuteFlowUsdt}
+                  value={scanDraft.liquidityCheckRequired ? scanDraft.liquidityGuard : "off"}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    if (v === "off") {
+                      patchScanDraft({ liquidityCheckRequired: false });
+                    } else {
+                      patchScanDraft({
+                        liquidityCheckRequired: true,
+                        liquidityGuard: v
+                      });
+                    }
+                  }}
+                >
+                  {LIQUIDITY_GUARD_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <FieldLabel
+                  id="min5mFlow"
+                  label="Min 5m Volume"
+                  help="Scan results only include tokens with at least this much quote volume in the latest 5m window (Binance kline / DexScreener m5). When the guard is not Off, this threshold also feeds the **Volume** side of momentum entry (if your guard mode includes volume)."
+                  activeTip={activeTip}
+                  onToggleTip={setActiveTip}
+                />
+                <select
+                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  value={scanDraft.minFiveMinuteFlowUsdt}
                   onChange={(event) =>
-                    setForm((prev) => ({ ...prev, minFiveMinuteFlowUsdt: Number(event.target.value) }))
+                    patchScanDraft({ minFiveMinuteFlowUsdt: Number(event.target.value) })
                   }
                 >
                   <option value={10000}>10k</option>
@@ -595,19 +794,98 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
               </label>
               <label className="grid gap-1">
                 <FieldLabel
-                  id="stopLoss"
-                  label="Stop Loss"
-                  help="Trade exits if unrealized PnL drops beyond this percentage."
+                  id="minMarketCap"
+                  label="Min Market Cap"
+                  help="Used when Liquidity + MC Guard is not **Off** and your guard mode includes **MC**. Token must have reported market cap (or FDV on Dex) at least this high. **> $1M** means strictly above $1M (≥ $1,000,001)."
                   activeTip={activeTip}
                   onToggleTip={setActiveTip}
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.stopLossPercent}
-                  onChange={(event) => setForm((prev) => ({ ...prev, stopLossPercent: event.target.value }))}
+                  value={scanDraft.minMarketCapUsd}
+                  onChange={(event) =>
+                    patchScanDraft({ minMarketCapUsd: Number(event.target.value) })
+                  }
                 >
-                  {[0.8, 1, 1.5, 2, 3].map((value) => (
+                  {MIN_MARKET_CAP_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              </div>
+
+              <div className="mt-4 flex w-full flex-wrap items-center justify-end border-t border-[var(--border)] pt-3 pb-3">
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={handleSaveScanner}
+                    disabled={!hasScannerDirty || isSavingScannerConfig}
+                    className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none border border-[#e50914] bg-[#e50914] text-white hover:bg-[#c40710]"
+                  >
+                    {isSavingScannerConfig ? "Saving..." : "Save Config"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={handleResetScannerConfig}
+                    className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none"
+                  >
+                    Reset Config
+                  </Button>
+                </div>
+              </div>
+              </div>
+            </AccordionSection>
+
+            <AccordionSection
+              title="Bot Settings"
+              isOpen={isBotSettingsOpen}
+              onToggle={() => setIsBotSettingsOpen((prev) => !prev)}
+              contentClassName="pb-0"
+            >
+              <div>
+              <div className="grid gap-3 md:grid-cols-3">
+              <label className="grid gap-1">
+                <FieldLabel
+                  id="amount"
+                  label="Bet Amount (USDT)"
+                  help="Position size used per paper trade. Limited to safer presets for now."
+                  activeTip={activeTip}
+                  onToggleTip={setActiveTip}
+                />
+                <select
+                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  value={tradeDraft.positionSizeUsdt}
+                  onChange={(event) => patchTradeDraft({ positionSizeUsdt: event.target.value })}
+                >
+                  {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50].map((value) => (
                     <option key={value} value={value}>
+                      ${value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <FieldLabel
+                  id="stopLoss"
+                  label="Max Affordable Loss"
+                  help="If unrealized PnL vs entry is this far **into the red**, the bot closes the trade (full exit). Same rule as before—only the label is clearer for planning how much drawdown you can accept."
+                  activeTip={activeTip}
+                  onToggleTip={setActiveTip}
+                />
+                <select
+                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  value={String(tradeDraft.stopLossPercent)}
+                  onChange={(event) =>
+                    patchTradeDraft({ stopLossPercent: Number(event.target.value) })
+                  }
+                >
+                  {MAX_AFFORDABLE_LOSS_OPTIONS.map((value) => (
+                    <option key={value} value={String(value)}>
                       {value}%
                     </option>
                   ))}
@@ -623,8 +901,8 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.maxHoldMinutes}
-                  onChange={(event) => setForm((prev) => ({ ...prev, maxHoldMinutes: event.target.value }))}
+                  value={tradeDraft.maxHoldMinutes}
+                  onChange={(event) => patchTradeDraft({ maxHoldMinutes: event.target.value })}
                 >
                   {[15, 30, 45, 60, 120].map((value) => (
                     <option key={value} value={value}>
@@ -635,26 +913,126 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
               </label>
               <label className="grid gap-1">
                 <FieldLabel
-                  id="tpSteps"
-                  label="Take-Profit Steps"
-                  help="The bot sells in incremental partial exits as price moves up. With the default Balanced profile (1.5, 3, 4.5, 6), it sells 25% of the original position at +1.5%, another 25% at +3.0%, another 25% at +4.5%, and the final 25% at +6.0%."
+                  id="tpUpward"
+                  label="Take profit (upward)"
+                  help="Locks gains while price is still **rising in your favor** vs entry. Each threshold is **total PnL %** (same as account view), not chart patterns. **Multiplier presets** use m,2m,...,10m with sells 10%,20%,...,100% of remaining (e.g. m=3 => 3%,6%,...,30%). **Off** = no upward clips; use downward + stop + max hold instead."
                   activeTip={activeTip}
                   onToggleTip={setActiveTip}
                 />
                 <select
                   className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                  value={form.takeProfitStepsPercent}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, takeProfitStepsPercent: event.target.value }))
-                  }
+                  value={upwardPresetKey}
+                  onChange={(event) => {
+                    const key = event.target.value;
+                    const preset = UPWARD_TP_PRESETS[key];
+                    if (!preset) return;
+                    patchTradeDraft({
+                      takeProfitStepsPercent: preset.steps,
+                      takeProfitStepSellFraction: preset.uniform,
+                      takeProfitStepSellFractions: preset.perStep ?? ""
+                    });
+                  }}
                 >
-                  <option value="1.5,3,4.5,6">Balanced (1.5, 3, 4.5, 6)</option>
-                  <option value="1,2,3,4">Aggressive (1, 2, 3, 4)</option>
-                  <option value="2,4,6,8">Conservative (2, 4, 6, 8)</option>
+                  <option value="balanced">
+                    {
+                      "Balanced — Profit - 1.5%, Sell - 25% | Profit - 3%, Sell - 25% | Profit - 4.5%, Sell - 25% | Profit - 6%, Sell - 25%"
+                    }
+                  </option>
+                  <option value="aggressive">
+                    {
+                      "Aggressive — Profit - 1%, Sell - 25% | Profit - 2%, Sell - 25% | Profit - 3%, Sell - 25% | Profit - 4%, Sell - 25%"
+                    }
+                  </option>
+                  <option value="conservative">
+                    {
+                      "Conservative — Profit - 2%, Sell - 25% | Profit - 4%, Sell - 25% | Profit - 6%, Sell - 25% | Profit - 8%, Sell - 25%"
+                    }
+                  </option>
+                  <option value="progressive_5">
+                    {
+                      "Progressive — Profit - 1%, Sell - 10% | Profit - 2%, Sell - 20% | Profit - 3%, Sell - 30% | Profit - 4%, Sell - 40% | Profit - 5%, Sell - 100%"
+                    }
+                  </option>
+                  <option value="multiplier_1">Multiplier 1x — 1%,2%,...,10% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_2">Multiplier 2x — 2%,4%,...,20% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_3">Multiplier 3x — 3%,6%,...,30% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_4">Multiplier 4x — 4%,8%,...,40% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_5">Multiplier 5x — 5%,10%,...,50% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_8">Multiplier 8x — 8%,16%,...,80% with sells 10%,20%,...,100%</option>
+                  <option value="multiplier_10">Multiplier 10x — 10%,20%,...,100% with sells 10%,20%,...,100%</option>
+                  <option value="none">Off (no upward staged sells)</option>
+                  <option value="custom" disabled={!upwardIsCustom}>
+                    {upwardIsCustom ? "Custom (from saved config)" : "Custom"}
+                  </option>
                 </select>
               </label>
-              <div className="md:col-span-3 flex flex-wrap items-end gap-x-6 gap-y-4">
-                <label className="grid shrink-0 gap-1">
+              <label className="grid gap-1 md:col-span-1">
+                <FieldLabel
+                  id="tpDownward"
+                  label="Take profit (downward)"
+                  help="Acts while price **gives back** part of the move from **entry to the best high** since you opened. Measure: (peak − current) / (peak − entry) × 100. Each line sells **that fraction of what you still hold** (after any upward clips). **Balanced** = six wider steps (50→100% giveback, 10→60% clips). **Progressive (5 steps)** = 10% giveback→sell 10% of remaining, 20%→20%, … 100% giveback→sell 100% (full exit at full retracement to entry). **Off** disables this; legacy “dip from peak **price**” still exists only after an upward clip if downward is off. Stop loss still applies below your floor."
+                  activeTip={activeTip}
+                  onToggleTip={setActiveTip}
+                />
+                <select
+                  className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  value={downwardPresetKey}
+                  onChange={(event) => {
+                    const key = event.target.value;
+                    const preset = DOWNWARD_RETRACE_PRESETS[key];
+                    if (!preset) return;
+                    patchTradeDraft({
+                      dipRetracementSteps: preset.steps,
+                      dipRetracementSellFractions: preset.fracs
+                    });
+                  }}
+                >
+                  <option value="balanced">
+                    {
+                      "Balanced — PnL Loss - 50%, Sell - 10% | PnL Loss - 60%, Sell - 20% | PnL Loss - 70%, Sell - 30% | PnL Loss - 80%, Sell - 40% | PnL Loss - 90%, Sell - 50% | PnL Loss - 100%, Sell - 60%"
+                    }
+                  </option>
+                  <option value="proportional_5">
+                    {
+                      "Aggressive — PnL Loss - 10%, Sell - 10% | PnL Loss - 20%, Sell - 20% | PnL Loss - 30%, Sell - 30% | PnL Loss - 40%, Sell - 40% | PnL Loss - 100%, Sell - 100%"
+                    }
+                  </option>
+                  <option value="none">Off (no downward retracement clips)</option>
+                  <option value="custom" disabled={!downwardIsCustom}>
+                    {downwardIsCustom ? "Custom (from saved config)" : "Custom"}
+                  </option>
+                </select>
+              </label>
+              {tradeDraft.dipRetracementSteps !== "none" ? (
+                <label className="grid gap-1 md:col-span-1">
+                  <FieldLabel
+                    id="minMfeRetrace"
+                    label="Minimum move up before downward sells"
+                    help="Why: downward % is (peak−price)/(peak−entry). If price only ticked a hair above entry, that denominator is tiny—normal noise looks like a huge “retrace” and could trigger sells too early. Pick a **whole percent**: only arm those PnL Loss / Sell pairs after ((peak−entry)/entry)×100 reaches at least this much. Higher = stricter; lower = sooner on smaller pops."
+                    activeTip={activeTip}
+                    onToggleTip={setActiveTip}
+                  />
+                  <select
+                    className="h-9 w-full rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                    value={String(tradeDraft.minDipRetracementMfeBasisPercent)}
+                    onChange={(event) =>
+                      patchTradeDraft({
+                        minDipRetracementMfeBasisPercent: Number(event.target.value)
+                      })
+                    }
+                  >
+                    {[5, 10, 20, 30, 50, 80, 100].map((value) => (
+                      <option key={value} value={value}>
+                        {value}% move up vs entry (before arming downward)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              </div>
+
+              <div className="mt-4 flex w-full flex-wrap items-center gap-x-3 gap-y-2 border-t border-[var(--border)] pt-3 pb-3">
+                <label className="grid shrink-0 gap-0.5">
                   <FieldLabel
                     id="autoModeSwitch"
                     label="Auto Mode"
@@ -664,78 +1042,44 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsEditingDraft(true);
-                      setForm((prev) => ({ ...prev, autoMode: !prev.autoMode }));
-                    }}
-                    className={`relative inline-flex h-[27px] w-[80px] items-center rounded-full border px-1 transition ${
-                      form.autoMode ? "border-[#e50914] bg-[#e50914]" : "border-[#9ca3af] bg-[#6b7280]"
+                    onClick={() => patchTradeDraft({ autoMode: !tradeDraft.autoMode })}
+                    className={`relative inline-flex h-6 w-[68px] items-center rounded-full border px-0.5 transition ${
+                      tradeDraft.autoMode ? "border-[#e50914] bg-[#e50914]" : "border-[#9ca3af] bg-[#6b7280]"
                     }`}
-                    aria-pressed={Boolean(form.autoMode)}
-                    aria-label={`Auto mode ${form.autoMode ? "on" : "off"}`}
+                    aria-pressed={Boolean(tradeDraft.autoMode)}
+                    aria-label={`Auto mode ${tradeDraft.autoMode ? "on" : "off"}`}
                   >
                     <span
-                      className={`pointer-events-none absolute text-[10px] font-bold tracking-wide ${
-                        form.autoMode ? "left-2 text-white" : "right-2 text-white"
+                      className={`pointer-events-none absolute text-[9px] font-bold tracking-wide ${
+                        tradeDraft.autoMode ? "left-1.5 text-white" : "right-1.5 text-white"
                       }`}
                     >
-                      {form.autoMode ? "ON" : "OFF"}
+                      {tradeDraft.autoMode ? "ON" : "OFF"}
                     </span>
                     <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition ${
-                        form.autoMode ? "translate-x-[54px]" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </label>
-                <label className="grid shrink-0 gap-1">
-                  <FieldLabel
-                    id="mcSwitch"
-                    label="MC Check"
-                    help="Require liquidity + market-cap checks before entry."
-                    activeTip={activeTip}
-                    onToggleTip={setActiveTip}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleMCToggle}
-                    className={`relative inline-flex h-[27px] w-[80px] items-center rounded-full border px-1 transition ${
-                      form.liquidityCheckRequired ? "border-[#e50914] bg-[#e50914]" : "border-[#9ca3af] bg-[#6b7280]"
-                    }`}
-                    aria-pressed={Boolean(form.liquidityCheckRequired)}
-                    aria-label={`MC check ${form.liquidityCheckRequired ? "on" : "off"}`}
-                  >
-                    <span
-                      className={`pointer-events-none absolute text-[10px] font-bold tracking-wide ${
-                        form.liquidityCheckRequired ? "left-2 text-white" : "right-2 text-white"
-                      }`}
-                    >
-                      {form.liquidityCheckRequired ? "ON" : "OFF"}
-                    </span>
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition ${
-                        form.liquidityCheckRequired ? "translate-x-[54px]" : "translate-x-0"
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition ${
+                        tradeDraft.autoMode ? "translate-x-[50px]" : "translate-x-0"
                       }`}
                     />
                   </button>
                 </label>
                 <div className="min-w-[2rem] flex-1 basis-[1rem]" aria-hidden />
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
                   <Button
                     size="sm"
                     type="button"
-                    onClick={handleSave}
-                    disabled={!hasDirtyConfigChanges || isSavingConfig}
-                    className="h-9 shrink-0 border border-[#e50914] bg-[#e50914] text-white hover:bg-[#c40710]"
+                    onClick={handleSaveTrade}
+                    disabled={!hasTradeDirty || isSavingTradeConfig}
+                    className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none border border-[#e50914] bg-[#e50914] text-white hover:bg-[#c40710]"
                   >
-                    {isSavingConfig ? "Saving..." : "Save Config"}
+                    {isSavingTradeConfig ? "Saving..." : "Save Config"}
                   </Button>
                   <Button
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={handleResetConfig}
-                    className="h-9 shrink-0"
+                    onClick={handleResetTradeConfig}
+                    className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none"
                   >
                     Reset Config
                   </Button>
@@ -744,7 +1088,7 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                       size="sm"
                       type="button"
                       variant="outline"
-                      className="h-9 shrink-0 border-[#e50914] text-[#e50914] hover:bg-[#e50914]/10"
+                      className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none border-[#e50914] text-[#e50914] hover:bg-[#e50914]/10"
                       onClick={() => setIsStopModalOpen(true)}
                     >
                       Stop Bot
@@ -753,22 +1097,34 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                     <Button
                       size="sm"
                       type="button"
-                      className="h-9 shrink-0 border border-[#e50914] bg-[#e50914] text-white hover:bg-[#c40710]"
+                      className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none border border-[#e50914] bg-[#e50914] text-white hover:bg-[#c40710]"
                       onClick={handleStart}
                       disabled={isRunBotRequestPending}
                     >
                       {isRunBotRequestPending
                         ? "Starting…"
-                        : form.autoMode
+                        : tradeDraft.autoMode
                           ? "Run Bot (Auto)"
                           : "Scan Tokens"}
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    className="h-7 shrink-0 rounded-md px-2.5 text-[11px] leading-none"
+                    onClick={() => {
+                      setShowAutoStoppedScan(true);
+                      void onAction("previewScan", { limit: scanLimitFilter, timeframe: scanTimeframeFilter });
+                    }}
+                  >
+                    Refresh Scan
+                  </Button>
                 </div>
               </div>
-            </div>
+              </div>
+            </AccordionSection>
           </form>
-          </AccordionSection>
           <AccordionSection
               title="Scanned Tokens"
               titleMeta={scannedTokensTitleMeta}
@@ -779,7 +1135,11 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   <select
                     className="h-9 min-w-[160px] rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--input-fg)]"
                     value={scanLimitFilter}
-                    onChange={(event) => setScanLimitFilter(Number(event.target.value))}
+                    onChange={(event) => {
+                      const nextLimit = Number(event.target.value);
+                      setScanLimitFilter(nextLimit);
+                      triggerHeaderAutoScan(nextLimit, scanTimeframeFilter);
+                    }}
                   >
                     {[5, 10, 15, 20].map((value) => (
                       <option key={value} value={value}>
@@ -790,7 +1150,11 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   <select
                     className="h-9 min-w-[140px] rounded-lg border border-[var(--input-border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--input-fg)]"
                     value={scanTimeframeFilter}
-                    onChange={(event) => setScanTimeframeFilter(event.target.value)}
+                    onChange={(event) => {
+                      const nextTimeframe = event.target.value;
+                      setScanTimeframeFilter(nextTimeframe);
+                      triggerHeaderAutoScan(scanLimitFilter, nextTimeframe);
+                    }}
                   >
                     {SCAN_TABLE_TIMEFRAMES.map((value) => (
                       <option key={value} value={value}>
@@ -798,17 +1162,6 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                       </option>
                     ))}
                   </select>
-                  <Button
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowAutoStoppedScan(true);
-                      void onAction("previewScan", { limit: scanLimitFilter, timeframe: scanTimeframeFilter });
-                    }}
-                  >
-                    Refresh Scan
-                  </Button>
                 </>
               }
             >
@@ -824,19 +1177,42 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   <thead className="sticky top-0 z-10 bg-[var(--panel)]">
                     <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
                       <th className="py-2 pr-2">Token</th>
+                      <th className="py-2 pr-2">Token name</th>
                       <th className="py-2 pr-2">Signal</th>
                       <th className="py-2 pr-2">Score</th>
-                      <th className="w-[150px] py-2 pr-2">
-                        Gain/Loss ({formatTimeframeForHeader(effectiveScanTimeframe)})
+                      <th
+                        className="min-w-[128px] py-2 pr-2 align-top"
+                        title={`Gain/Loss uses selected scan timeframe (${formatTimeframeForHeader(
+                          effectiveScanTimeframe
+                        )}).`}
+                      >
+                        <button
+                          type="button"
+                          className="inline-flex cursor-pointer items-center gap-1"
+                          onClick={toggleGainSort}
+                          aria-label="Sort by gain/loss"
+                        >
+                          Gain/Loss
+                          <span className="text-[10px] leading-none">
+                            {gainSortDirection === "desc"
+                              ? "▼"
+                              : gainSortDirection === "asc"
+                                ? "▲"
+                                : "↕"}
+                          </span>
+                        </button>
                       </th>
                       <th className="py-2 pr-2">Spread</th>
-                      <th className="py-2 pr-2">
+                      <th
+                        className="py-2 pr-2"
+                        title="Quote volume for the selected scan timeframe."
+                      >
                         <button
                           type="button"
                           className="inline-flex cursor-pointer items-center gap-1"
                           onClick={toggleVolumeSort}
                         >
-                          Volume
+                          {`Volume (${formatTimeframeForHeader(effectiveScanTimeframe)})`}
                           <span className="text-[10px]">
                             {volumeSortDirection === "desc"
                               ? "▼"
@@ -846,15 +1222,16 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                           </span>
                         </button>
                       </th>
+                      <th className="py-2 pr-2">MC</th>
                       <th className="py-2 pr-2 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {scanTableLoading ? (
                       <tr>
-                        <td className="py-6" colSpan={7}>
+                        <td className="py-6" colSpan={9}>
                           <div className="flex flex-col items-center justify-center gap-2">
-                            <span className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--myFavColor)]" />
+                            <span className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--myFavColor)] border-r-transparent [animation-direction:normal]" />
                             {isRunBotRequestPending && !previewScanLoading ? (
                               <span className="text-[var(--text-muted)]">Starting bot…</span>
                             ) : null}
@@ -864,7 +1241,7 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                     ) : null}
                     {!scanTableLoading && scannedTokensForUi.length === 0 ? (
                       <tr>
-                        <td className="py-3 text-[var(--text-muted)]" colSpan={7}>
+                        <td className="py-3 text-[var(--text-muted)]" colSpan={9}>
                           {autoStopped && !showAutoStoppedScan
                             ? "No scan yet — start Run Bot (Auto) or Refresh Scan."
                             : "No scanned tokens yet. Click Refresh Scan."}
@@ -881,18 +1258,36 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                               <p className="text-[var(--text)]">{formatUsdtPair(token.symbol)}</p>
                               <a
                                 className="mt-0.5 inline-block text-[11px] text-[#E50914] underline-offset-2 hover:underline"
-                                href={`https://www.binance.com/en/trade/${token.baseAsset}_USDT?type=spot`}
+                                href={
+                                  token.links?.binance ??
+                                  `https://www.binance.com/en/trade/${token.baseAsset}_USDT?type=spot`
+                                }
                                 rel="noreferrer"
                                 target="_blank"
                               >
                                 Chart
                               </a>
                             </td>
+                            <td className="py-2 pr-2 text-[var(--text)]">
+                              {(token.baseAsset && String(token.baseAsset).trim()) || "—"}
+                            </td>
                             <td className="py-2 pr-2 uppercase">{token.signal?.replace("_", " ")}</td>
                             <td className="py-2 pr-2">{token.score}</td>
-                            <td className="py-2 pr-2">{formatGainLossPercent(token.gainPercent)}</td>
+                            <td className="py-2 pr-2">
+                              {formatGainLossPercent(getTokenGainSortValue(token, gainSortMetric))}
+                            </td>
                             <td className="py-2 pr-2">{formatPercent(token.spreadPercent)}</td>
-                            <td className="py-2 pr-2">{formatMoney(token.quoteVolume)}</td>
+                            <td className="py-2 pr-2">
+                              {(() => {
+                                const displayedVolume = getDisplayedVolume(token);
+                                return displayedVolume == null ? "n/a" : formatMoney(displayedVolume);
+                              })()}
+                            </td>
+                            <td className="py-2 pr-2">
+                              {typeof token?.metadata?.marketCapUsd === "number"
+                                ? formatUsdNoDecimals(token.metadata.marketCapUsd)
+                                : "n/a"}
+                            </td>
                             <td className="py-2 pr-0 text-right">
                               <Button
                                 size="sm"
@@ -934,7 +1329,7 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                 <span
                   className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${collapsedPnlClass}`}
                 >
-                  PnL: {formatPercent(activeTrade.pnlPercent)} ({formatMoney(activeTrade.pnlUsdt)})
+                  Net PnL: {formatPercent(activeTrade.pnlPercent)} ({formatMoney(activeTrade.pnlUsdt)})
                 </span>
               ) : null
             }
@@ -946,10 +1341,12 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   <thead>
                     <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
                       <th className="py-2 pr-2">Token</th>
+                      <th className="py-2 pr-2">Bet Amount</th>
+                      <th className="py-2 pr-2">%age Sold</th>
                       <th className="py-2 pr-2">Buy Price</th>
                       <th className="py-2 pr-2">Current</th>
-                      <th className="py-2 pr-2">PnL %</th>
-                      <th className="py-2 pr-2">PnL USDT</th>
+                      <th className="py-2 pr-2">Net PnL %</th>
+                      <th className="py-2 pr-2">Net PnL USDT</th>
                       <th className="py-2 pr-2">Time Bought</th>
                       <th className="py-2 pr-2">Time Spent</th>
                       <th className="py-2 pr-2">Time Remaining</th>
@@ -964,12 +1361,21 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                         <p className="text-[var(--text)]">{formatUsdtPair(activeTrade.symbol)}</p>
                         <a
                           className="mt-0.5 inline-block text-[11px] text-[#E50914] underline-offset-2 hover:underline"
-                          href={`https://www.binance.com/en/trade/${activeTrade.baseAsset}_USDT?type=spot`}
+                          href={
+                            activeTrade.chartUrl ??
+                            `https://www.binance.com/en/trade/${activeTrade.baseAsset}_USDT?type=spot`
+                          }
                           rel="noreferrer"
                           target="_blank"
                         >
                           Chart
                         </a>
+                      </td>
+                      <td className="py-2 pr-2">
+                        {formatMoney(activeTrade.positionSizeUsdt ?? botState?.config?.positionSizeUsdt)}
+                      </td>
+                      <td className="py-2 pr-2 font-medium text-[#e50914]">
+                        {soldPercent == null ? "—" : `${soldPercent.toFixed(0)}%`}
                       </td>
                       <td className="py-2 pr-2">{formatMoney(activeTrade.entryPrice)}</td>
                       <td className="py-2 pr-2">{formatMoney(activeTrade.currentPrice)}</td>
@@ -1006,7 +1412,20 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                           </Button>
                         </div>
                       </td>
-                      <td className="max-w-[360px] py-2 pr-2 text-[var(--text)]">{tradeWhyBought}</td>
+                      <td className="max-w-[360px] py-2 pr-2 text-[var(--text)]">
+                        <div className="flex items-start gap-1.5">
+                          <span className="min-w-0 flex-1">{tradeWhyBought}</span>
+                          <button
+                            type="button"
+                            className="mt-0.5 shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]"
+                            title="Bot settings used when this trade opened"
+                            aria-label="Show bot settings for this trade"
+                            onClick={() => setIsTradeSettingsModalOpen(true)}
+                          >
+                            <Info className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-2 pl-2 text-right">
                         <Button
                           size="sm"
@@ -1085,6 +1504,49 @@ export function RunBotSection({ botState, previewScanLoading, onAction, onSaveCo
                   {isStopActionPending && stopConfirmMode === "close" ? "Working…" : "Stop Bot + Active Trade"}
                 </Button>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isTradeSettingsModalOpen && activeTrade ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="trade-settings-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIsTradeSettingsModalOpen(false);
+          }}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="trade-settings-title" className="text-lg font-semibold text-[var(--text)]">
+              Bot settings at trade open
+            </h3>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Snapshot from when this position was opened (changing Bot Settings later does not update this).
+            </p>
+            {activeTrade.settingsAtOpen ? (
+              <dl className="mt-4 space-y-2 text-sm">
+                {tradeSettingsAtOpenRows(activeTrade.settingsAtOpen).map(([label, value]) => (
+                  <div key={label} className="grid grid-cols-[minmax(0,11rem)_1fr] gap-x-3 gap-y-1 border-b border-[var(--border)] border-opacity-50 py-2 last:border-0">
+                    <dt className="text-[var(--text-muted)]">{label}</dt>
+                    <dd className="text-right text-[var(--text)]">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="mt-4 text-sm text-[var(--text-muted)]">
+                No snapshot stored for this trade (trades opened before this feature only show the live config in Bot
+                Settings, not a frozen copy).
+              </p>
+            )}
+            <div className="mt-5 flex justify-end">
+              <Button type="button" variant="outline" onClick={() => setIsTradeSettingsModalOpen(false)}>
+                Close
+              </Button>
             </div>
           </div>
         </div>

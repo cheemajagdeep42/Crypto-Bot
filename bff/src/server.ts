@@ -4,7 +4,14 @@ import { watch } from "node:fs";
 import path from "node:path";
 import { marketStream } from "./marketStream";
 import { paperBot } from "./paperBot";
-import { parseTimeframe, scanTopSignals, scanTopTrending } from "./scanner";
+import { buildBotConfigPatch } from "./botConfigPatch";
+import { openApiSpec, swaggerUiHtml } from "./openapi";
+import {
+    parseTimeframe,
+    parseTimeframeFromPreviewBody,
+    scanTopSignals,
+    scanTopTrending
+} from "./scanner";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const publicDir = path.resolve(__dirname, "..", "..", "ui", "public");
@@ -91,6 +98,17 @@ const server = createServer(async (req, res) => {
         return;
     }
 
+    if (url.pathname === "/api/openapi.json") {
+        sendJson(res, 200, openApiSpec);
+        return;
+    }
+
+    if (url.pathname === "/api/docs") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(swaggerUiHtml());
+        return;
+    }
+
     if (url.pathname === "/api/market-stream/state") {
         sendJson(res, 200, marketStream.getState());
         return;
@@ -115,15 +133,13 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/bot/preview-scan" && req.method === "POST") {
         const body = await readJsonBody(req);
-        const requestedTimeframe = parseTimeframe(
-            typeof body.timeframe === "string" ? body.timeframe : null
-        );
+        const timeframe = parseTimeframeFromPreviewBody(body.timeframe);
         sendJson(
             res,
             200,
             await paperBot.previewScan({
                 limit: Number(body.limit),
-                timeframe: requestedTimeframe,
+                ...(timeframe ? { timeframe } : {}),
             })
         );
         return;
@@ -154,32 +170,9 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/bot/config" && req.method === "POST") {
         const body = await readJsonBody(req);
-        const parseArray = (value: unknown): number[] | undefined => {
-            if (!Array.isArray(value)) return undefined;
-            return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
-        };
+        const patch = buildBotConfigPatch(body);
 
-        sendJson(
-            res,
-            200,
-            paperBot.updateConfig({
-                autoMode: Boolean(body.autoMode),
-                scanLimit: Number(body.scanLimit),
-                liquidityCheckRequired: Boolean(body.liquidityCheckRequired),
-                timeframe: body.timeframe === "30m" ? "30m" : "1h",
-                liquidityGuard: "both",
-                minFiveMinuteFlowUsdt: Number(body.minFiveMinuteFlowUsdt),
-                positionSizeUsdt: Number(body.positionSizeUsdt),
-                takeProfitStepsPercent: parseArray(body.takeProfitStepsPercent),
-                takeProfitStepSellFraction: Number(body.takeProfitStepSellFraction),
-                dipStepsPercent: parseArray(body.dipStepsPercent),
-                dipStepSellFractions: parseArray(body.dipStepSellFractions),
-                breakEvenBufferPercent: Number(body.breakEvenBufferPercent),
-                stopLossPercent: Number(body.stopLossPercent),
-                maxHoldMinutes: Number(body.maxHoldMinutes),
-                scanIntervalSeconds: Number(body.scanIntervalSeconds),
-            })
-        );
+        sendJson(res, 200, paperBot.updateConfig(patch));
         return;
     }
 

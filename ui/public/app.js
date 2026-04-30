@@ -28,7 +28,6 @@ const cfgTpSteps = document.querySelector("#cfgTpSteps");
 const cfgTpFraction = document.querySelector("#cfgTpFraction");
 const cfgDipSteps = document.querySelector("#cfgDipSteps");
 const cfgDipFractions = document.querySelector("#cfgDipFractions");
-const cfgBeBuffer = document.querySelector("#cfgBeBuffer");
 const cfgStopLoss = document.querySelector("#cfgStopLoss");
 const cfgMaxHold = document.querySelector("#cfgMaxHold");
 const botStatus = document.querySelector("#botStatus");
@@ -624,7 +623,6 @@ function renderBotState(state) {
     botExitRules.innerHTML =
         `Sell 25% at ${tpSteps}.<br>` +
         `Protect profit if price falls ${dipSteps} from peak.<br>` +
-        `Break-even guard: +${state.config.breakEvenBufferPercent}%.<br>` +
         `Max loss: -${state.config.stopLossPercent}%.`;
     botStartButton.disabled = state.status === "running";
     botStopButton.disabled = state.status !== "running";
@@ -643,7 +641,6 @@ function renderBotState(state) {
     cfgTpFraction.value = tpFractionValue;
     cfgDipSteps.value = dipStepsValues.join(", ");
     cfgDipFractions.value = dipFractionsValues.join(", ");
-    cfgBeBuffer.value = state.config.breakEvenBufferPercent;
     cfgStopLoss.value = state.config.stopLossPercent;
     cfgMaxHold.value = state.config.maxHoldMinutes;
 
@@ -794,7 +791,6 @@ botConfigForm.addEventListener("submit", async (event) => {
         takeProfitStepSellFraction: Number(cfgTpFraction.value),
         dipStepsPercent: parseNumberList(cfgDipSteps.value),
         dipStepSellFractions: parseNumberList(cfgDipFractions.value),
-        breakEvenBufferPercent: Number(cfgBeBuffer.value),
         stopLossPercent: Number(cfgStopLoss.value),
         maxHoldMinutes: Number(cfgMaxHold.value),
     });
