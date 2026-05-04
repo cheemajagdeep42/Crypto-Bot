@@ -38,6 +38,14 @@ export class SqliteBotStore implements BotStore {
                 message TEXT NOT NULL
             )
         `);
+        try {
+            const cols = this.db.prepare("PRAGMA table_info(bot_runtime)").all() as Array<{ name: string }>;
+            if (!cols.some((c) => c.name === "last_momentum_trade_opened_at")) {
+                this.db.exec("ALTER TABLE bot_runtime ADD COLUMN last_momentum_trade_opened_at TEXT");
+            }
+        } catch {
+            /* ignore migration errors */
+        }
     }
 
     hasState(): boolean {
@@ -52,7 +60,7 @@ export class SqliteBotStore implements BotStore {
             const runtime = this.db
                 .prepare(
                     `
-                    SELECT status, mode, config_json, active_trade_json, last_scan_at, next_scan_at
+                    SELECT status, mode, config_json, active_trade_json, last_scan_at, next_scan_at, last_momentum_trade_opened_at
                     FROM bot_runtime
                     WHERE id = 1
                 `
@@ -65,6 +73,7 @@ export class SqliteBotStore implements BotStore {
                       active_trade_json: string | null;
                       last_scan_at: string | null;
                       next_scan_at: string | null;
+                      last_momentum_trade_opened_at: string | null;
                   }
                 | undefined;
 
@@ -94,19 +103,39 @@ export class SqliteBotStore implements BotStore {
                 message: string;
             }>;
 
+            let activeTrades: BotState["activeTrades"] = [];
+            let activeTrade: BotState["activeTrade"] = null;
+            if (runtime.active_trade_json) {
+                try {
+                    const parsed = JSON.parse(runtime.active_trade_json) as
+                        | BotState["activeTrades"]
+                        | BotState["activeTrade"];
+                    if (Array.isArray(parsed)) {
+                        activeTrades = parsed.filter((t) => t && t.status === "open");
+                    } else if (parsed && typeof parsed === "object" && "status" in parsed && parsed.status === "open") {
+                        activeTrades = [parsed as BotState["tradeHistory"][number]];
+                    }
+                    activeTrade = activeTrades[0] ?? null;
+                } catch {
+                    activeTrades = [];
+                    activeTrade = null;
+                }
+            }
+
             return {
                 status: runtime.status,
                 mode: runtime.mode,
                 config: JSON.parse(runtime.config_json) as BotState["config"],
-                activeTrade: runtime.active_trade_json
-                    ? (JSON.parse(runtime.active_trade_json) as BotState["activeTrade"])
-                    : null,
+                activeTrades,
+                activeTrade,
                 lastScanTokens: [],
                 tradeHistory: tradeRows.map((row) => JSON.parse(row.trade_json) as BotState["tradeHistory"][number]),
                 logs: logRows,
                 lastScanAt: runtime.last_scan_at,
                 nextScanAt: runtime.next_scan_at,
                 lastScanTimeframe: "24h",
+                lastMomentumTradeOpenedAt: runtime.last_momentum_trade_opened_at ?? null,
+                autoEntryTarget: null,
             };
         } catch {
             return null;
@@ -121,9 +150,9 @@ export class SqliteBotStore implements BotStore {
                 .prepare(
                     `
                     INSERT INTO bot_runtime (
-                        id, status, mode, config_json, active_trade_json, last_scan_at, next_scan_at, updated_at
+                        id, status, mode, config_json, active_trade_json, last_scan_at, next_scan_at, last_momentum_trade_opened_at, updated_at
                     )
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status = excluded.status,
                         mode = excluded.mode,
@@ -131,6 +160,7 @@ export class SqliteBotStore implements BotStore {
                         active_trade_json = excluded.active_trade_json,
                         last_scan_at = excluded.last_scan_at,
                         next_scan_at = excluded.next_scan_at,
+                        last_momentum_trade_opened_at = excluded.last_momentum_trade_opened_at,
                         updated_at = excluded.updated_at
                 `
                 )
@@ -138,9 +168,10 @@ export class SqliteBotStore implements BotStore {
                     state.status,
                     state.mode,
                     JSON.stringify(state.config),
-                    state.activeTrade ? JSON.stringify(state.activeTrade) : null,
+                    state.activeTrades.length > 0 ? JSON.stringify(state.activeTrades) : null,
                     state.lastScanAt,
                     state.nextScanAt,
+                    state.lastMomentumTradeOpenedAt ?? null,
                     now
                 );
 

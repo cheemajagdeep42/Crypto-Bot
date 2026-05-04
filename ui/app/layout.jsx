@@ -1,5 +1,7 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
+import { AppToaster } from "../components/providers/AppToaster";
+import { SolanaProviders } from "../components/wallet/SolanaProviders";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -14,7 +16,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} antialiased`}>{children}</body>
+      <body className={`${inter.variable} antialiased`}>
+        <SolanaProviders>
+          {children}
+          <AppToaster />
+        </SolanaProviders>
+      </body>
     </html>
   );
 }

@@ -3,8 +3,13 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Loader2 } from "lucide-react";
-import { formatGainLossPercent, formatUsdtPair, getTokenGainSortValue } from "../../lib/formatters";
-import { Pagination } from "../common/Pagination";
+import {
+  formatGainLossPercent,
+  formatPairAge,
+  formatUsdtPair,
+  getTokenGainSortValue
+} from "../../lib/formatters";
+import { PaginatedTableContainer } from "../common/PaginatedTableContainer";
 
 const timeframes = ["30m", "1h", "3h", "6h", "12h", "24h", "3d", "1w", "1mo"];
 
@@ -14,6 +19,18 @@ const signalFilterOptions = [
   { value: "watch", label: "Watch" },
   { value: "bad_buy", label: "Bad buy" }
 ];
+
+/** DexScreener pair page or Binance spot — used as chart/deep link for scanned rows. */
+function chartHrefForToken(token) {
+  const dex = token?.metadata?.dexUrl;
+  const link = token?.links?.binance;
+  const base = typeof token?.baseAsset === "string" ? token.baseAsset.trim() : "";
+  return (
+    (typeof dex === "string" && dex.trim()) ||
+    (typeof link === "string" && link.trim()) ||
+    (base ? `https://www.binance.com/en/trade/${base}_USDT?type=spot` : "#")
+  );
+}
 
 export function ScannerSection({
   signals,
@@ -27,7 +44,8 @@ export function ScannerSection({
   totalPages,
   onLimitChange,
   onTimeframeChange,
-  onPageChange
+  onPageChange,
+  showPairAgeColumn = false
 }) {
   const [gainSortMetric, setGainSortMetric] = useState("window");
   const [gainSortDirection, setGainSortDirection] = useState(null);
@@ -50,6 +68,7 @@ export function ScannerSection({
   const placeholderCount =
     !loading && hasRows ? Math.max(0, targetRows - signals.length) : 0;
   const showEmptyState = !loading && !hasRows;
+  const colCount = 8 + (showPairAgeColumn ? 1 : 0);
 
   return (
     <Card>
@@ -93,13 +112,13 @@ export function ScannerSection({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-[var(--text-muted)]">{statusText}</p>
-        <div className="relative rounded-lg border border-[var(--border)]">
+        <div className="relative">
           {loading ? (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white/50 dark:bg-black/20">
-              <Loader2 className="h-7 w-7 animate-spin text-[#E50914]" />
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#E50914]" aria-hidden />
             </div>
           ) : null}
-          <div className="overflow-hidden">
+          <PaginatedTableContainer page={page} totalPages={totalPages} onPageChange={onPageChange}>
             <table className="min-w-full table-fixed text-sm">
               <thead className="bg-[#f8fafc] text-left text-sm tracking-wide text-[var(--text-muted)]">
                 <tr>
@@ -141,6 +160,14 @@ export function ScannerSection({
                       </button>
                     </div>
                   </th>
+                  {showPairAgeColumn ? (
+                    <th
+                      className="h-12 px-3 py-2 text-right align-middle whitespace-nowrap"
+                      title="Time since the DEX pool was created (DexScreener pairCreatedAt)."
+                    >
+                      Pair age
+                    </th>
+                  ) : null}
                   <th className="h-12 px-3 py-2 text-right align-middle">Pullback</th>
                   <th className="h-12 px-3 py-2 text-right align-middle">Spread</th>
                   <th
@@ -160,7 +187,7 @@ export function ScannerSection({
               <tbody>
                 {showEmptyState ? (
                   <tr className="border-t border-[var(--border)]">
-                    <td className="px-3 align-middle" colSpan={8}>
+                    <td className="px-3 align-middle" colSpan={colCount}>
                       <div className="flex min-h-[280px] items-center justify-center text-sm text-[var(--text-muted)]">
                         No data found
                       </div>
@@ -171,20 +198,19 @@ export function ScannerSection({
                     {sortedSignals.map((token) => (
                       <tr key={token.symbol} className="h-14 border-t border-[var(--border)]">
                         <td className="px-3 py-2 align-middle">
-                          <p className="text-sm font-medium text-[var(--brand)]">{token.baseAsset}</p>
-                          <div className="mt-0.5 flex items-center gap-2 text-xs">
-                            <span className="text-[var(--text-muted)]">{formatUsdtPair(token.symbol)}</span>
+                          <p className="text-sm font-medium">
                             <a
-                              className="text-[#E50914] underline-offset-2 hover:underline"
-                              href={
-                                token.links?.binance ??
-                                `https://www.binance.com/en/trade/${token.baseAsset}_USDT?type=spot`
-                              }
-                              rel="noreferrer"
+                              className="text-[var(--brand)] underline-offset-2 hover:underline"
+                              href={chartHrefForToken(token)}
                               target="_blank"
+                              rel="noreferrer"
+                              title="Open chart / pair page"
                             >
-                              Chart
+                              {token.baseAsset}
                             </a>
+                          </p>
+                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {formatUsdtPair(token.symbol)}
                           </div>
                         </td>
                         <td className="px-3 py-2 align-middle">{token.signal ?? "n/a"}</td>
@@ -192,6 +218,11 @@ export function ScannerSection({
                         <td className="px-3 py-2 text-right align-middle">
                           {formatGainLossPercent(getTokenGainSortValue(token, gainSortMetric))}
                         </td>
+                        {showPairAgeColumn ? (
+                          <td className="px-3 py-2 text-right align-middle tabular-nums whitespace-nowrap">
+                            {formatPairAge(token.pairListedAtMs)}
+                          </td>
+                        ) : null}
                         <td className="px-3 py-2 text-right align-middle">{formatGainLossPercent(token.pullbackPercent)}</td>
                         <td className="px-3 py-2 text-right align-middle">{formatGainLossPercent(token.spreadPercent)}</td>
                         <td className="px-3 py-2 text-right align-middle">
@@ -211,7 +242,7 @@ export function ScannerSection({
                     {placeholderCount > 0 &&
                       Array.from({ length: placeholderCount }).map((_, index) => (
                         <tr key={`placeholder-${index}`} className="h-14 border-t border-[var(--border)]">
-                          <td className="px-3 py-2 align-middle" colSpan={8}>
+                          <td className="px-3 py-2 align-middle" colSpan={colCount}>
                             &nbsp;
                           </td>
                         </tr>
@@ -220,8 +251,7 @@ export function ScannerSection({
                 )}
               </tbody>
             </table>
-          </div>
-          <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+          </PaginatedTableContainer>
         </div>
       </CardContent>
     </Card>

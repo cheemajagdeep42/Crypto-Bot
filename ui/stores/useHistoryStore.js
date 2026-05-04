@@ -9,8 +9,10 @@ export const useHistoryStore = create((set, get) => ({
   logs: [],
   tradeHistory: [],
   historyPollTimer: null,
+  historyLoading: false,
 
   loadHistory: async () => {
+    set({ historyLoading: true });
     try {
       const body = await fetchBotState();
       set({
@@ -22,6 +24,8 @@ export const useHistoryStore = create((set, get) => ({
         logs: [],
         tradeHistory: []
       });
+    } finally {
+      set({ historyLoading: false });
     }
   },
 

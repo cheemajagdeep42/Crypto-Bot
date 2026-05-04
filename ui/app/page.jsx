@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "../components/ui/card";
 import { Sidebar } from "../components/layout/Sidebar";
 import { HistorySection } from "../components/sections/HistorySection";
+import { WalletSection } from "../components/sections/WalletSection";
 import { RunBotSection } from "../components/sections/RunBotSection";
 import { ScannerSection } from "../components/sections/ScannerSection";
+import { PumpTokensSection } from "../components/sections/PumpTokensSection";
 import { useBotStore } from "../stores/useBotStore";
 import { useHistoryStore } from "../stores/useHistoryStore";
 import { useScannerStore } from "../stores/useScannerStore";
@@ -23,8 +25,24 @@ export default function Page() {
   };
 
   const { activeSection, setActiveSection } = useUiStore();
-  const { botState, previewScanLoading, loadBotState, runBotAction, startPollingBotState, stopPollingBotState } = useBotStore();
-  const { logs, tradeHistory, loadHistory, startPollingHistory, stopPollingHistory } = useHistoryStore();
+  const {
+    botState,
+    botStateError,
+    previewScanLoading,
+    loadBotState,
+    runBotAction,
+    startPollingBotState,
+    stopPollingBotState,
+    saveBotConfig
+  } = useBotStore();
+  const {
+    logs,
+    tradeHistory,
+    historyLoading,
+    loadHistory,
+    startPollingHistory,
+    stopPollingHistory
+  } = useHistoryStore();
   const {
     signals,
     signalsLoading,
@@ -40,11 +58,17 @@ export default function Page() {
     setPage,
     loadSignals
   } = useScannerStore();
-  const { saveBotConfig } = useBotStore();
+  const signalsMarketSource = botState?.config?.marketSource;
+
+  const activeTradesList = useMemo(() => {
+    const list = botState?.activeTrades;
+    if (Array.isArray(list) && list.length > 0) return list;
+    return botState?.activeTrade ? [botState.activeTrade] : [];
+  }, [botState?.activeTrades, botState?.activeTrade]);
 
   useEffect(() => {
     void loadSignals();
-  }, [limit, timeframe, loadSignals]);
+  }, [limit, timeframe, signalsMarketSource, loadSignals]);
 
   useEffect(() => {
     void loadBotState();
@@ -75,6 +99,9 @@ export default function Page() {
 
   const filteredSignals =
     signalFilter === "all" ? signals : signals.filter((token) => token.signal === signalFilter);
+  const showPairAgeColumn =
+    signalsMarketSource === "dexscreener" &&
+    filteredSignals.some((t) => t.pairListedAtMs != null && Number.isFinite(Number(t.pairListedAtMs)));
   const totalPages = Math.max(1, Math.ceil(filteredSignals.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const paginatedSignals = filteredSignals.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -94,12 +121,28 @@ export default function Page() {
         />
 
         <section
-          className={`flex-1 space-y-6 p-4 md:p-6 ${
+          className={`min-w-0 flex-1 space-y-6 p-4 md:p-6 ${
             activeSection === "history" || activeSection === "wallet"
               ? "pt-[24px] md:pt-[24px]"
               : "pt-[50px] md:pt-[50px]"
           }`}
         >
+          {botStateError ? (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-900 dark:text-amber-100">
+              {botState ? (
+                <>
+                  <span className="font-medium text-[var(--text)]">Could not refresh bot state</span> — showing the
+                  last loaded snapshot. Check BFF on port 3001.{" "}
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-[var(--text)]">BFF not reachable</span> — live bot state and
+                  saved configs will load when the API responds.{" "}
+                </>
+              )}
+              <span className="text-[var(--text-muted)]">{botStateError}</span>
+            </p>
+          ) : null}
           {activeSection === "scanner" && (
             <ScannerSection
               signals={paginatedSignals}
@@ -114,11 +157,13 @@ export default function Page() {
               onLimitChange={setLimit}
               onTimeframeChange={setTimeframe}
               onPageChange={setPage}
+              showPairAgeColumn={showPairAgeColumn}
             />
           )}
 
-          {activeSection === "runBot" && (
+          {activeSection === "configs" && (
             <RunBotSection
+              view="configs"
               botState={botState}
               previewScanLoading={previewScanLoading}
               onAction={runBotAction}
@@ -126,18 +171,37 @@ export default function Page() {
             />
           )}
 
+          {activeSection === "runBot" && (
+            <RunBotSection
+              view="run"
+              botState={botState}
+              previewScanLoading={previewScanLoading}
+              onAction={runBotAction}
+              onSaveConfig={saveBotConfig}
+            />
+          )}
+
+          {activeSection === "pumpTokens" && <PumpTokensSection />}
+
           {activeSection === "history" && (
-            <HistorySection logs={logs} tradeHistory={tradeHistory} activeTrade={botState?.activeTrade ?? null} />
+            <HistorySection
+              logs={logs}
+              tradeHistory={tradeHistory}
+              historyLoading={historyLoading}
+              activeTrade={botState?.activeTrade ?? null}
+              activeTrades={activeTradesList}
+              botState={botState}
+            />
           )}
 
           {activeSection === "wallet" && (
-            <Card className="min-h-[200px] border-[var(--border)] bg-[var(--panel)]">
-              <CardContent className="pt-6">
-                <p className="text-sm text-[var(--text-muted)]">
-                  Wallet — this area will be implemented next.
-                </p>
-              </CardContent>
-            </Card>
+            <WalletSection
+              tradeHistory={botState?.tradeHistory ?? []}
+              activeTrade={botState?.activeTrade ?? null}
+              activeTrades={activeTradesList}
+              watchWalletAddressW1={botState?.config?.watchWalletAddress ?? ""}
+              watchWalletAddressW2={botState?.config?.watchWalletAddressW2 ?? ""}
+            />
           )}
         </section>
       </div>

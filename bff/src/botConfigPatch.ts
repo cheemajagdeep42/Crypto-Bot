@@ -1,5 +1,7 @@
-import { normalizeMarketSource, type BotConfigPatch } from "./paperBot";
-import { normalizeLiquidityGuard } from "./scanner";
+import { normalizeBotMinEntryChartTimeframes } from "./minEntryChart";
+import { normalizeAutoSignBetUsdt, normalizeMarketSource, type BotConfigPatch } from "./paperBot";
+import { normalizeLiquidityGuard, normalizeMaxMarketCapUsd } from "./scanner";
+import { normalizeWatchWalletAddress } from "./watchWalletAddress";
 
 function parseArray(value: unknown): number[] | undefined {
     if (!Array.isArray(value)) return undefined;
@@ -15,6 +17,9 @@ export function buildBotConfigPatch(body: Record<string, unknown>): BotConfigPat
     if ("autoMode" in body) {
         patch.autoMode = Boolean(body.autoMode);
     }
+    if (body.executionMode === "live" || body.executionMode === "paper") {
+        patch.executionMode = body.executionMode;
+    }
     if ("scanLimit" in body) {
         patch.scanLimit = Number(body.scanLimit);
     }
@@ -24,17 +29,26 @@ export function buildBotConfigPatch(body: Record<string, unknown>): BotConfigPat
     if ("liquidityGuard" in body) {
         patch.liquidityGuard = normalizeLiquidityGuard(body.liquidityGuard);
     }
-    if ("timeframe" in body && body.timeframe !== undefined && body.timeframe !== null) {
-        patch.timeframe = body.timeframe === "30m" ? "30m" : "1h";
-    }
     if ("minFiveMinuteFlowUsdt" in body && body.minFiveMinuteFlowUsdt !== undefined && body.minFiveMinuteFlowUsdt !== null) {
         patch.minFiveMinuteFlowUsdt = Number(body.minFiveMinuteFlowUsdt);
     }
     if (body.minMarketCapUsd !== undefined && body.minMarketCapUsd !== null) {
         patch.minMarketCapUsd = Number(body.minMarketCapUsd);
     }
+    if (body.maxMarketCapUsd !== undefined && body.maxMarketCapUsd !== null) {
+        patch.maxMarketCapUsd = normalizeMaxMarketCapUsd(body.maxMarketCapUsd);
+    }
+    if (body.dexMinPairAgeMinutes !== undefined && body.dexMinPairAgeMinutes !== null) {
+        patch.dexMinPairAgeMinutes = Number(body.dexMinPairAgeMinutes);
+    }
+    if (Array.isArray(body.minEntryChartTimeframes)) {
+        patch.minEntryChartTimeframes = normalizeBotMinEntryChartTimeframes(body.minEntryChartTimeframes);
+    }
     if ("positionSizeUsdt" in body && body.positionSizeUsdt !== undefined && body.positionSizeUsdt !== null) {
         patch.positionSizeUsdt = Number(body.positionSizeUsdt);
+    }
+    if ("maxSlippagePercent" in body && body.maxSlippagePercent !== undefined && body.maxSlippagePercent !== null) {
+        patch.maxSlippagePercent = Number(body.maxSlippagePercent);
     }
     if ("takeProfitStepsPercent" in body) {
         const tp = parseArray(body.takeProfitStepsPercent);
@@ -69,9 +83,6 @@ export function buildBotConfigPatch(body: Record<string, unknown>): BotConfigPat
     if ("maxHoldMinutes" in body && body.maxHoldMinutes !== undefined && body.maxHoldMinutes !== null) {
         patch.maxHoldMinutes = Number(body.maxHoldMinutes);
     }
-    if ("scanIntervalSeconds" in body && body.scanIntervalSeconds !== undefined && body.scanIntervalSeconds !== null) {
-        patch.scanIntervalSeconds = Number(body.scanIntervalSeconds);
-    }
     if (Array.isArray(body.dipRetracementStepsPercent)) {
         const steps = parseArray(body.dipRetracementStepsPercent);
         if (steps !== undefined) {
@@ -89,6 +100,25 @@ export function buildBotConfigPatch(body: Record<string, unknown>): BotConfigPat
         body.minDipRetracementMfeBasisPercent !== null
     ) {
         patch.minDipRetracementMfeBasisPercent = Number(body.minDipRetracementMfeBasisPercent);
+    }
+    if ("watchWalletAddress" in body) {
+        patch.watchWalletAddress = normalizeWatchWalletAddress(body.watchWalletAddress);
+    }
+    if ("watchWalletAddressW2" in body) {
+        patch.watchWalletAddressW2 = normalizeWatchWalletAddress(body.watchWalletAddressW2);
+    }
+    if ("autoSignMainnet" in body) {
+        patch.autoSignMainnet = Boolean(body.autoSignMainnet);
+    }
+    if (body.autoSignBetUsdt !== undefined && body.autoSignBetUsdt !== null) {
+        patch.autoSignBetUsdt = normalizeAutoSignBetUsdt(body.autoSignBetUsdt);
+    }
+    if (
+        "tradeCooldownSeconds" in body &&
+        body.tradeCooldownSeconds !== undefined &&
+        body.tradeCooldownSeconds !== null
+    ) {
+        patch.tradeCooldownSeconds = Number(body.tradeCooldownSeconds);
     }
     return patch;
 }

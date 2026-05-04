@@ -19,6 +19,7 @@ This file tracks high-impact upgrades for the crypto scanner + paper bot.
 
 ## 3) Market data and execution quality
 
+- [ ] **Live Solana:** Jupiter `POST /swap` + wallet sign + RPC send; persist tx sig; devnet toggle + safer defaults
 - [ ] Dynamic WebSocket subscriptions for top scanned symbols (subscribe/unsubscribe set)
 - [ ] Stream heartbeat + latency monitoring + stale-data fallback behavior
 - [ ] Local price cache health metrics (update frequency, gaps, delay)
@@ -34,6 +35,7 @@ This file tracks high-impact upgrades for the crypto scanner + paper bot.
 ## 5) UI and observability
 
 - [x] **Run Bot config split (UI):** Two accordions — **Bot Settings** (trade params + auto/save/run row) and **Scanner Settings** — inside one form so Save still sends the full config.
+- [ ] **In-trade sell steppers:** Allow changing steppers for partial sells (upward / downward TP ladders, etc.) while a trade is in progress — tune exits on the fly without only relying on config saved before entry.
 - [ ] Strategy config panel (no-code param tuning from dashboard)
 - [ ] Per-trade timeline (entry, partials, exits, reasons)
 - [ ] Net PnL chart (gross vs fees)

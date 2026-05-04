@@ -1,8 +1,18 @@
-import { ChartCandlestick, History, Lightbulb, PlayCircle, Wallet } from "lucide-react";
+import {
+  ChartCandlestick,
+  History,
+  Lightbulb,
+  PlayCircle,
+  Rocket,
+  SlidersHorizontal,
+  Wallet
+} from "lucide-react";
 
 const navItems = [
   { id: "scanner", label: "Market", icon: ChartCandlestick },
+  { id: "configs", label: "Configs", icon: SlidersHorizontal },
   { id: "runBot", label: "Run Bot", icon: PlayCircle },
+  { id: "pumpTokens", label: "Pump Tokens", icon: Rocket },
   { id: "history", label: "Logs", icon: History },
   { id: "wallet", label: "Wallet", icon: Wallet }
 ];

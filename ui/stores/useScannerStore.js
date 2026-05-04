@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { fetchSignals } from "../lib/api/dashboardApi";
+import { toastError } from "../lib/toast";
 
 export const useScannerStore = create((set, get) => ({
   signals: [],
@@ -29,9 +30,11 @@ export const useScannerStore = create((set, get) => ({
         page: 1
       });
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to load signals.";
+      toastError(error, "Failed to load market signals");
       set({
         signals: [],
-        statusText: error instanceof Error ? error.message : "Failed to load signals."
+        statusText: msg
       });
     } finally {
       set({ signalsLoading: false });

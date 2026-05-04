@@ -1,5 +1,17 @@
 import Decimal from "decimal.js";
+import {
+    minEntryFactorName,
+    normalizeMinEntryChartTimeframes,
+    type MinEntryChartTimeframe,
+} from "./minEntryChart";
 import { getCoinMarketCapUrl, getTokenMetadata } from "./tokenMetadata";
+
+export type { MinEntryChartTimeframe } from "./minEntryChart";
+export {
+    MIN_ENTRY_CHART_TIMEFRAME_OPTIONS,
+    normalizeBotMinEntryChartTimeframes,
+    normalizeMinEntryChartTimeframes,
+} from "./minEntryChart";
 
 type Ticker24h = {
     symbol: string;
@@ -95,8 +107,12 @@ export type TokenSignal = {
         dexPairAddress?: string;
         dexChainId?: string;
         dexUrl?: string;
+        /** Set when token was added via “Add by address” (DexScreener); survives full scans for auto mode. */
+        addedByUserAddress?: boolean;
     };
     factors: SignalFactor[];
+    /** DexScreener: `pairCreatedAt` (ms). Binance paths: always `null`. */
+    pairListedAtMs: number | null;
 };
 
 export type ScanResult = {
@@ -149,7 +165,28 @@ export type EntryGuardOptions = {
     liquidityCheckRequired?: boolean;
     /** Minimum market cap (USD) when MC check is on; must be one of `MIN_MARKET_CAP_USD_CHOICES`. */
     minMarketCapUsd?: number;
+    /** Maximum market cap (USD) for scan list and momentum entry; `0` = no limit. See `MAX_MARKET_CAP_USD_CHOICES`. */
+    maxMarketCapUsd?: number;
+    /** DexScreener safety: minimum pool age (minutes) before a pair is considered. Default 30. */
+    dexMinPairAgeMinutes?: number;
+    /**
+     * Each selected chart must be strictly positive (>0%) for the token to stay in the scanner list.
+     * Default `["5m"]` when omitted. See `Min entry (tf)` factors on each token.
+     */
+    minEntryChartTimeframes?: readonly MinEntryChartTimeframe[];
+    /** Binance scan only: 24h `priceChangePercent` by symbol (from `/ticker/24hr`). */
+    binance24hChangePctBySymbol?: ReadonlyMap<string, number>;
 };
+
+/** True if every required Min entry (tf) factor is `good` (token must include those factors). */
+export function tokenPassesMinEntryCharts(t: TokenSignal, options?: EntryGuardOptions): boolean {
+    const required = normalizeMinEntryChartTimeframes(options?.minEntryChartTimeframes);
+    for (const tf of required) {
+        const f = t.factors.find((x) => x.name === minEntryFactorName(tf));
+        if (!f || f.status !== "good") return false;
+    }
+    return true;
+}
 
 /** UI / BFF — must match Run Bot `MIN_MARKET_CAP_OPTIONS` values. */
 export const MIN_MARKET_CAP_USD_CHOICES = [
@@ -171,10 +208,43 @@ export function normalizeMinMarketCapUsd(raw: unknown): number {
     return DEFAULT_MIN_MARKET_CAP_USD;
 }
 
+/** Upper MC bound for scanner + auto entry; `0` = off. Must match Run Bot max MC dropdown. */
+export const MAX_MARKET_CAP_USD_CHOICES = [
+    0, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000,
+] as const;
+
+export const DEFAULT_MAX_MARKET_CAP_USD = 0;
+
+export function normalizeMaxMarketCapUsd(raw: unknown): number {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) {
+        return 0;
+    }
+    let best: number = MAX_MARKET_CAP_USD_CHOICES[1]!;
+    let bestDist = Math.abs(best - v);
+    for (const choice of MAX_MARKET_CAP_USD_CHOICES) {
+        if (choice === 0) continue;
+        const d = Math.abs(choice - v);
+        if (d < bestDist) {
+            best = choice;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
 /** Short label for tooltips / blocker copy (1_000_001 = strictly above $1M). */
 export function formatMinMarketCapThresholdLabel(usd: number): string {
     if (usd === 1_000_001) return ">$1M";
     if (usd >= 1_000_000) return "$1M";
+    if (usd >= 1_000) return `$${Math.round(usd / 1_000)}k`;
+    return `$${usd}`;
+}
+
+/** Label for max MC (no limit when 0). */
+export function formatMaxMarketCapThresholdLabel(usd: number): string {
+    if (usd <= 0) return "no limit";
+    if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(usd % 1_000_000 === 0 ? 0 : 1)}M`;
     if (usd >= 1_000) return `$${Math.round(usd / 1_000)}k`;
     return `$${usd}`;
 }
@@ -326,13 +396,47 @@ async function getBookTickers(): Promise<BookTicker[]> {
 
 async function getKlines(
     symbol: string,
-    interval: "5m" | "15m",
+    interval: "1m" | "5m" | "15m" | "1h",
     limit = 50
 ): Promise<Kline[]> {
     return fetchJson<Kline[]>(
         `${BASE_URL}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
         60_000
     );
+}
+
+function binanceMinEntryGainPercent(
+    tf: MinEntryChartTimeframe,
+    args: {
+        two: Decimal | null;
+        five: Decimal | null;
+        ten: Decimal | null;
+        fifteen: Decimal | null;
+        thirty: Decimal | null;
+        oneHour: Decimal | null;
+        twentyFourHour: Decimal | null;
+    }
+): number | null {
+    const pick = (d: Decimal | null): number | null =>
+        d != null && d.isFinite() ? toNumber(d) : null;
+    switch (tf) {
+        case "2m":
+            return pick(args.two);
+        case "5m":
+            return pick(args.five);
+        case "10m":
+            return pick(args.ten);
+        case "15m":
+            return pick(args.fifteen);
+        case "30m":
+            return pick(args.thirty);
+        case "1h":
+            return pick(args.oneHour);
+        case "24h":
+            return pick(args.twentyFourHour);
+        default:
+            return null;
+    }
 }
 
 async function getMonthlyTicker(symbol: string, fallback: Ticker24h): Promise<RollingTicker | null> {
@@ -464,17 +568,19 @@ function getMomentumEntry(
     microTrendOk: boolean,
     drawdownOk: boolean,
     flow5mOk: boolean,
-    marketCapOk: boolean,
+    marketCapMinOk: boolean,
+    marketCapMaxOk: boolean,
     liquidityCheckRequired: boolean,
     liquidityGuard: LiquidityGuardMode,
-    minMarketCapLabel: string
+    minMarketCapLabel: string,
+    maxMarketCapLabel: string
 ): { entry: boolean; reason: string } {
     const gainOk = candidate.gain.gte(1) && candidate.gain.lte(5);
     const liquidityOk = candidate.volume.gte(MIN_MOMENTUM_VOLUME_USDT);
     const spreadOk = candidate.spread.lte(MAX_SPREAD_PERCENT);
     const needFlow = liquidityCheckRequired && (liquidityGuard === "both" || liquidityGuard === "volume");
     const needMc = liquidityCheckRequired && (liquidityGuard === "both" || liquidityGuard === "mc");
-    const liquidityChecksOk = (!needFlow || flow5mOk) && (!needMc || marketCapOk);
+    const liquidityChecksOk = (!needFlow || flow5mOk) && (!needMc || marketCapMinOk);
     const entry =
         gainOk &&
         liquidityOk &&
@@ -482,7 +588,8 @@ function getMomentumEntry(
         trendOk &&
         microTrendOk &&
         drawdownOk &&
-        liquidityChecksOk;
+        liquidityChecksOk &&
+        marketCapMaxOk;
 
     if (entry) {
         return {
@@ -499,8 +606,11 @@ function getMomentumEntry(
     if (!microTrendOk) blockers.push("5m micro-trend still weak");
     if (!drawdownOk) blockers.push("recent drawdown too deep");
     if (needFlow && !flow5mOk) blockers.push("5m quote flow below configured minimum");
-    if (needMc && !marketCapOk) {
+    if (needMc && !marketCapMinOk) {
         blockers.push(`market cap below ${minMarketCapLabel} (or unknown)`);
+    }
+    if (!marketCapMaxOk) {
+        blockers.push(`market cap above max (${maxMarketCapLabel})`);
     }
 
     return {
@@ -524,13 +634,27 @@ async function analyzeCandidate(
     timeframeLabel: string,
     options?: EntryGuardOptions
 ): Promise<TokenSignal> {
-    const [klines5m, klines15m] = await Promise.all([
+    const requiredMin = normalizeMinEntryChartTimeframes(options?.minEntryChartTimeframes);
+    const need1h = requiredMin.includes("1h");
+    const need2m = requiredMin.includes("2m");
+
+    const [klines5m, klines15m, klines1h, klines1m] = await Promise.all([
         getKlines(candidate.symbol, "5m", 50),
         getKlines(candidate.symbol, "15m", 50),
+        need1h ? getKlines(candidate.symbol, "1h", 3) : Promise.resolve([] as Kline[]),
+        need2m ? getKlines(candidate.symbol, "1m", 30) : Promise.resolve([] as Kline[]),
     ]);
 
     const closes5m = getCloses(klines5m);
     const closes15m = getCloses(klines15m);
+    const closes1h = need1h ? getCloses(klines1h) : [];
+    const closes1m = need2m ? getCloses(klines1m) : [];
+    const price2mAgo = closes1m.length >= 3 ? closes1m[closes1m.length - 3] : null;
+    const current1mPrice = closes1m.length >= 1 ? closes1m[closes1m.length - 1] : null;
+    const twoMinuteChangePercent =
+        price2mAgo && price2mAgo.gt(0) && current1mPrice
+            ? current1mPrice.minus(price2mAgo).div(price2mAgo).mul(100)
+            : null;
 
     const trendOk = isUptrend15m(closes15m);
     const microTrendOk = isMicroUptrend5m(closes5m);
@@ -552,6 +676,41 @@ async function analyzeCandidate(
         price30mAgo && price30mAgo.gt(0) && currentFiveMinutePrice
             ? currentFiveMinutePrice.minus(price30mAgo).div(price30mAgo).mul(100)
             : null;
+    const price15mAgo = closes15m.length >= 2 ? closes15m[closes15m.length - 2] : null;
+    const current15mPrice = closes15m.length >= 1 ? closes15m[closes15m.length - 1] : null;
+    const fifteenMinuteChangePercent =
+        price15mAgo && price15mAgo.gt(0) && current15mPrice
+            ? current15mPrice.minus(price15mAgo).div(price15mAgo).mul(100)
+            : null;
+    const price1hAgo = closes1h.length >= 2 ? closes1h[closes1h.length - 2] : null;
+    const current1hPrice = closes1h.length >= 1 ? closes1h[closes1h.length - 1] : null;
+    const oneHourChangePercent =
+        price1hAgo && price1hAgo.gt(0) && current1hPrice
+            ? current1hPrice.minus(price1hAgo).div(price1hAgo).mul(100)
+            : null;
+    const h24raw = options?.binance24hChangePctBySymbol?.get(candidate.symbol);
+    const twentyFourHourChangePercent =
+        h24raw != null && Number.isFinite(h24raw) ? new Decimal(h24raw) : null;
+
+    const minEntryCtx = {
+        two: twoMinuteChangePercent,
+        five: fiveMinuteChangePercent,
+        ten: tenMinuteChangePercent,
+        fifteen: fifteenMinuteChangePercent,
+        thirty: thirtyMinuteChangePercent,
+        oneHour: oneHourChangePercent,
+        twentyFourHour: twentyFourHourChangePercent,
+    };
+    const minEntryFactors: SignalFactor[] = requiredMin.map((tf) => {
+        const g = binanceMinEntryGainPercent(tf, minEntryCtx);
+        const ok = g != null && g > 0;
+        return {
+            name: minEntryFactorName(tf),
+            status: ok ? "good" : "bad",
+            value: g != null ? `${g.toFixed(2)}%` : "n/a",
+            note: "Binance-derived window change; scanner list requires >0% for each selected chart.",
+        };
+    });
     const latest5mQuoteVolume = new Decimal(klines5m[klines5m.length - 1]?.[7] ?? "0");
     const min5mFlowThreshold = new Decimal(options?.minFiveMinuteFlowUsdt ?? MIN_5M_FLOW_USDT);
     const liquidityCheckRequired = options?.liquidityCheckRequired ?? false;
@@ -559,6 +718,8 @@ async function analyzeCandidate(
         options?.minMarketCapUsd ?? DEFAULT_MIN_MARKET_CAP_USD
     );
     const minMarketCapLabel = formatMinMarketCapThresholdLabel(minMarketCapUsd.toNumber());
+    const maxMarketCapUsd = new Decimal(options?.maxMarketCapUsd ?? 0);
+    const maxMarketCapLabel = formatMaxMarketCapThresholdLabel(maxMarketCapUsd.toNumber());
     const liquidityGuard = normalizeLiquidityGuard(options?.liquidityGuard);
     const needFlow = liquidityCheckRequired && (liquidityGuard === "both" || liquidityGuard === "volume");
     const needMc = liquidityCheckRequired && (liquidityGuard === "both" || liquidityGuard === "mc");
@@ -571,20 +732,26 @@ async function analyzeCandidate(
     const baseAsset = baseAssetFromSymbol(candidate.symbol);
     const metadata = getTokenMetadata(baseAsset);
     const marketCapUsd = new Decimal(metadata.marketCapUsd ?? 0);
-    const marketCapOk = marketCapUsd.gte(minMarketCapUsd);
+    const marketCapMinOk = marketCapUsd.gte(minMarketCapUsd);
+    const marketCapMaxOk =
+        maxMarketCapUsd.lte(0) || !marketCapUsd.gt(0) || marketCapUsd.lte(maxMarketCapUsd);
+    const exceedsMaxMc = maxMarketCapUsd.gt(0) && marketCapUsd.gt(maxMarketCapUsd);
     const momentum = getMomentumEntry(
         candidate,
         trendOk,
         microTrendOk,
         drawdownOk,
         flow5mOk,
-        marketCapOk,
+        marketCapMinOk,
+        marketCapMaxOk,
         liquidityCheckRequired,
         liquidityGuard,
-        minMarketCapLabel
+        minMarketCapLabel,
+        maxMarketCapLabel
     );
 
     const factors: SignalFactor[] = [
+        ...minEntryFactors,
         {
             name: "Window gain",
             status: candidate.gain.gte(MIN_GAIN) && candidate.gain.lte(MAX_GAIN) ? "good" : "bad",
@@ -663,23 +830,25 @@ async function analyzeCandidate(
         },
         {
             name: "Market cap",
-            status: !liquidityCheckRequired
-                ? marketCapOk
-                    ? "good"
-                    : "warn"
-                : needMc
-                  ? marketCapOk
+            status: exceedsMaxMc
+                ? "bad"
+                : !liquidityCheckRequired
+                  ? marketCapMinOk
                       ? "good"
-                      : "bad"
-                  : marketCapOk
-                    ? "good"
-                    : "warn",
+                      : "warn"
+                  : needMc
+                    ? marketCapMinOk
+                        ? "good"
+                        : "bad"
+                    : marketCapMinOk
+                      ? "good"
+                      : "warn",
             value: marketCapUsd.gt(0) ? `$${marketCapUsd.toFixed(0)}` : "Unknown",
             note: !liquidityCheckRequired
-                ? `Liquidity check is off. Threshold would be ${minMarketCapLabel} if MC check were on.`
+                ? `Liquidity check is off. Min would be ${minMarketCapLabel} if MC check were on.${maxMarketCapUsd.gt(0) ? ` Max ${maxMarketCapLabel} (exceeding = no entry).` : ""}`
                 : needMc
-                  ? `Required for entry (guard: ${liquidityGuard}). Min ${minMarketCapLabel} (Binance: static metadata; unknown = fail).`
-                  : `Not required for entry (volume-only guard). Min would be ${minMarketCapLabel}.`,
+                  ? `Required for entry (guard: ${liquidityGuard}). Min ${minMarketCapLabel} (Binance: static metadata; unknown = fail).${maxMarketCapUsd.gt(0) ? ` Max ${maxMarketCapLabel}.` : ""}`
+                  : `Not required for entry (volume-only guard). Min would be ${minMarketCapLabel}.${maxMarketCapUsd.gt(0) ? ` Max ${maxMarketCapLabel}.` : ""}`,
         },
     ];
 
@@ -721,6 +890,7 @@ async function analyzeCandidate(
             marketCapUsd: metadata.marketCapUsd,
         },
         factors,
+        pairListedAtMs: null,
     };
 }
 
@@ -763,10 +933,15 @@ export async function scanTopSignals(
     options?: EntryGuardOptions
 ): Promise<ScanResult> {
     const timeframeLabel = TIMEFRAMES[timeframe].label;
-    const [tickers, books] = await Promise.all([
+    const [tickers, books, all24h] = await Promise.all([
         getTickersForTimeframe(timeframe),
         getBookTickers(),
+        get24hTickers(),
     ]);
+    const binance24hChangePctBySymbol = new Map<string, number>(
+        all24h.map((t) => [t.symbol, Number(t.priceChangePercent)])
+    );
+    const scanOptions: EntryGuardOptions = { ...options, binance24hChangePctBySymbol };
 
     const bookMap = new Map<string, BookTicker>(books.map((book) => [book.symbol, book]));
 
@@ -803,7 +978,7 @@ export async function scanTopSignals(
         .slice(0, candidateLimit);
 
     const analyzed = await Promise.all(
-        candidates.map((candidate) => analyzeCandidate(candidate, timeframeLabel, options))
+        candidates.map((candidate) => analyzeCandidate(candidate, timeframeLabel, scanOptions))
     );
 
     const min5mThreshold = new Decimal(options?.minFiveMinuteFlowUsdt ?? MIN_5M_FLOW_USDT);
@@ -813,6 +988,7 @@ export async function scanTopSignals(
             return v != null && Number.isFinite(v) && new Decimal(v).gte(min5mThreshold);
         })
         .filter(tokenPassesGainerScanFilter)
+        .filter((t) => tokenPassesMinEntryCharts(t, scanOptions))
         .sort((a, b) => b.gainPercent - a.gainPercent)
         .slice(0, safeLimit);
 
@@ -938,6 +1114,7 @@ export async function scanTopTrending(limit = 20, timeframe: TimeframeKey = "24h
                 marketCapUsd: metadata.marketCapUsd,
             },
             factors,
+            pairListedAtMs: null,
         };
     });
 

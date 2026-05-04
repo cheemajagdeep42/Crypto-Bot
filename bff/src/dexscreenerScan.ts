@@ -1,9 +1,16 @@
 import {
+    minEntryFactorName,
+    normalizeMinEntryChartTimeframes,
+    type MinEntryChartTimeframe,
+} from "./minEntryChart";
+import {
     DEFAULT_MIN_MARKET_CAP_USD,
+    formatMaxMarketCapThresholdLabel,
     formatMinMarketCapThresholdLabel,
     normalizeLiquidityGuard,
     SCAN_GAINER_MAX_5M_PULLBACK_PERCENT,
     tokenPassesGainerScanFilter,
+    tokenPassesMinEntryCharts,
     type EntryGuardOptions,
     type LiquidityGuardMode,
     type ScanResult,
@@ -11,9 +18,31 @@ import {
     type TimeframeKey,
     type TokenSignal,
 } from "./scanner";
+import { dexPairPassesSafetyHeuristics } from "./dexScamGuards";
 import { getCoinMarketCapUrl } from "./tokenMetadata";
 
 const BOOSTS_URL = "https://api.dexscreener.com/token-boosts/latest/v1";
+
+/**
+ * Which DexScreener boost chains to scan. Unset → **Solana only** (product default).
+ * `BFF_DEX_SCAN_CHAIN_IDS=all` scans every chain; or `solana,ethereum` style list.
+ */
+export function dexBoostChainAllowed(chainId: string): boolean {
+    const raw = process.env.BFF_DEX_SCAN_CHAIN_IDS?.trim();
+    if (!raw) {
+        return chainId.toLowerCase() === "solana";
+    }
+    if (raw.toLowerCase() === "all") {
+        return true;
+    }
+    const allow = new Set(
+        raw
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
+    );
+    return allow.has(chainId.toLowerCase());
+}
 /** Returns an array of pairs for the token (see DexScreener GET /tokens/v1/{chainId}/{tokenAddresses}). */
 const TOKENS_V1 = "https://api.dexscreener.com/tokens/v1";
 const PAIRS_BASE = "https://api.dexscreener.com/latest/dex/pairs";
@@ -24,6 +53,8 @@ type DexPair = {
     chainId: string;
     pairAddress: string;
     url: string;
+    /** Unix ms when the pool was created (DexScreener). */
+    pairCreatedAt?: number;
     baseToken: { address: string; name: string; symbol: string };
     quoteToken: { address: string; name: string; symbol: string };
     priceUsd?: string;
@@ -77,6 +108,55 @@ function dexGainLoss30mApprox(pc: DexPair["priceChange"]): number | null {
     if (typeof m5 === "number" && Number.isFinite(m5)) {
         const r = (1 + m5 / 100) ** 6 - 1;
         return Number((r * 100).toFixed(4));
+    }
+    return null;
+}
+
+/**
+ * Approximate % change for Min Entry Chart gates from DexScreener `priceChange` only.
+ * Strictly >0 required upstream for scanner inclusion.
+ */
+export function dexEntryChartGainPercent(
+    tf: MinEntryChartTimeframe,
+    pc: DexPair["priceChange"] | undefined | null
+): number | null {
+    if (!pc) return null;
+    if (tf === "2m") {
+        const m5 = pc.m5;
+        if (typeof m5 === "number" && Number.isFinite(m5)) {
+            return Number(((m5 * 2) / 5).toFixed(4));
+        }
+        const h1 = pc.h1;
+        if (typeof h1 === "number" && Number.isFinite(h1)) {
+            return Number(((h1 * 2) / 60).toFixed(4));
+        }
+        return null;
+    }
+    if (tf === "5m") {
+        const v = pc.m5;
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
+    }
+    if (tf === "10m") return dexGainLoss10mApprox(pc);
+    if (tf === "15m") {
+        const h1 = pc.h1;
+        if (typeof h1 === "number" && Number.isFinite(h1)) {
+            return Number(((h1 * 15) / 60).toFixed(4));
+        }
+        const m5 = pc.m5;
+        if (typeof m5 === "number" && Number.isFinite(m5)) {
+            const r = (1 + m5 / 100) ** 3 - 1;
+            return Number((r * 100).toFixed(4));
+        }
+        return null;
+    }
+    if (tf === "30m") return dexGainLoss30mApprox(pc);
+    if (tf === "1h") {
+        const v = pc.h1;
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
+    }
+    if (tf === "24h") {
+        const v = pc.h24 ?? pc.h6;
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
     }
     return null;
 }
@@ -162,6 +242,18 @@ function timeframeTxnCount(tf: TimeframeKey, txns: DexPair["txns"]): number {
     return slice.buys + slice.sells;
 }
 
+/**
+ * Dex `baseToken.symbol` matches UI `baseAsset` (e.g. EVA). `baseToken.name` is often a longer label (e.g. “ELON VS ALTMAN”).
+ * Use both in scan copy so history doesn’t look like two unrelated tokens.
+ */
+export function dexPaperTokenDisplayLabel(pair: DexPair): string {
+    const sym = String(pair.baseToken.symbol ?? "UNK").replace(/\s+/g, "").slice(0, 12);
+    const name = String(pair.baseToken.name ?? "").trim();
+    const nameNorm = name.replace(/\s+/g, "").toLowerCase();
+    if (!name || nameNorm === sym.toLowerCase()) return sym;
+    return `${sym} (${name})`;
+}
+
 /** Half-spread each side for paper Dex fills (0.06 => ±0.03% from mid). */
 export const DEX_PAPER_SPREAD_PERCENT = 0.06;
 
@@ -195,12 +287,18 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
     const liquidityRequired = Boolean(options?.liquidityCheckRequired);
     const minFlow = Number(options?.minFiveMinuteFlowUsdt ?? 30_000);
     const minMcUsd = Number(options?.minMarketCapUsd ?? DEFAULT_MIN_MARKET_CAP_USD);
+    const maxMcUsd = Number(options?.maxMarketCapUsd ?? 0);
+    const maxMcLabel = formatMaxMarketCapThresholdLabel(maxMcUsd);
     const cap = Number(pair.marketCap ?? pair.fdv ?? 0);
     const liquidityGuard: LiquidityGuardMode = normalizeLiquidityGuard(options?.liquidityGuard);
     const needFlow = liquidityRequired && (liquidityGuard === "both" || liquidityGuard === "volume");
     const needMc = liquidityRequired && (liquidityGuard === "both" || liquidityGuard === "mc");
     const capPassesMc = Number.isFinite(cap) && cap > 0 && cap >= minMcUsd;
-    const mcOk = !needMc || capPassesMc;
+    const capPassesMax = maxMcUsd <= 0 || !Number.isFinite(cap) || cap <= 0 || cap <= maxMcUsd;
+    if (maxMcUsd > 0 && Number.isFinite(cap) && cap > 0 && cap > maxMcUsd) {
+        return null;
+    }
+    const mcOk = (!needMc || capPassesMc) && capPassesMax;
     const flowPasses = needFlow
         ? dexMeetsMinFiveMinuteFlowUsd(m5vol, quoteVolume, minFlow)
         : m5vol >= minFlow || quoteVolume >= minFlow;
@@ -211,9 +309,25 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
     if (needMc && !capPassesMc) return null;
     if (needFlow && !flowPasses) return null;
 
+    const requiredMin = normalizeMinEntryChartTimeframes(options?.minEntryChartTimeframes);
+    const minEntryFactors: SignalFactor[] = [];
+    if (requiredMin.length > 0) {
+        for (const tf of requiredMin) {
+            const g = dexEntryChartGainPercent(tf, pair.priceChange);
+            if (g == null || g <= 0) return null;
+            minEntryFactors.push({
+                name: minEntryFactorName(tf),
+                status: "good",
+                value: `${g.toFixed(2)}%`,
+                note: "DexScreener priceChange for this window; scanner requires >0% for each selected chart.",
+            });
+        }
+    }
+
     const microGood = (m5chg !== null && m5chg >= -1) || gainPercent >= 0;
 
     const factors: SignalFactor[] = [
+        ...minEntryFactors,
         {
             name: "Dex window",
             status: gainPercent > 0 ? "good" : gainPercent > -2 ? "warn" : "bad",
@@ -254,23 +368,25 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
         },
         {
             name: "Market cap",
-            status: !liquidityRequired
-                ? cap > 0
-                    ? "good"
-                    : "warn"
-                : needMc
-                  ? capPassesMc
+            status: !capPassesMax
+                ? "bad"
+                : !liquidityRequired
+                  ? cap > 0
                       ? "good"
-                      : "bad"
-                  : capPassesMc
-                    ? "good"
-                    : "warn",
+                      : "warn"
+                  : needMc
+                    ? capPassesMc
+                        ? "good"
+                        : "bad"
+                    : capPassesMc
+                      ? "good"
+                      : "warn",
             value: cap > 0 && Number.isFinite(cap) ? `$${Math.round(cap).toLocaleString()}` : "Unknown",
             note: !liquidityRequired
-                ? `MC check off; would require ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} if enabled.`
+                ? `MC check off; would require ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} if enabled.${maxMcUsd > 0 ? ` Max ${maxMcLabel}.` : ""}`
                 : needMc
-                  ? `Required (guard: ${liquidityGuard}). ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} (marketCap / fdv).`
-                  : `Not required (volume-only guard). ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} for reference.`,
+                  ? `Required (guard: ${liquidityGuard}). ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} (marketCap / fdv).${maxMcUsd > 0 ? ` Max ${maxMcLabel}.` : ""}`
+                  : `Not required (volume-only guard). ≥ ${formatMinMarketCapThresholdLabel(minMcUsd)} for reference.${maxMcUsd > 0 ? ` Max ${maxMcLabel}.` : ""}`,
         },
     ];
 
@@ -278,6 +394,10 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
     const microTrendOk = factors.find((f) => f.name === "5m micro trend")?.status === "good";
     const flow5Ok = factors.find((f) => f.name === "5m flow")?.status === "good";
     const momentumEntry = Boolean(microTrendOk && flow5Ok && mcOk && gainPercent > -3);
+
+    const created = pair.pairCreatedAt;
+    const pairListedAtMs =
+        typeof created === "number" && Number.isFinite(created) && created > 0 ? Math.floor(created) : null;
 
     return {
         symbol: sym,
@@ -297,7 +417,7 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
         fiveMinutePriceAgo: m5chg !== null ? priceUsd / (1 + m5chg / 100) : null,
         currentFiveMinutePrice: priceUsd,
         momentumEntry,
-        momentumReason: `DexScreener paper: ${pair.baseToken.name} on ${pair.chainId} — ${gainPercent.toFixed(2)}% (${timeframeLabel}), liq $${Math.round(liq).toLocaleString()}.`,
+        momentumReason: `DexScreener paper: ${dexPaperTokenDisplayLabel(pair)} on ${pair.chainId} — ${gainPercent.toFixed(2)}% (${timeframeLabel}), liq $${Math.round(liq).toLocaleString()}.`,
         signal: momentumEntry && gainPercent > 0 ? "good_buy" : gainPercent > 0 ? "watch" : "bad_buy",
         score,
         confidence: momentumEntry ? "medium" : "low",
@@ -314,7 +434,155 @@ function pairToTokenSignal(pair: DexPair, timeframe: TimeframeKey, timeframeLabe
             dexUrl: pair.url,
         },
         factors,
+        pairListedAtMs,
     };
+}
+
+export type ResolveDexTokenResult =
+    | { ok: true; token: TokenSignal }
+    | { ok: false; error: string };
+
+/**
+ * From a pasted field: bare Solana/EVM mint, pair address, or full `dexscreener.com/{chain}/{id}` URL.
+ * `id` is the last path segment for URLs; otherwise the trimmed paste.
+ */
+export function parseDexscreenerPasteInput(raw: string, defaultChainId: string): { chainId: string; id: string } {
+    const trimmed = String(raw ?? "").trim();
+    const fallbackChain = String(defaultChainId ?? "solana").trim().toLowerCase();
+    if (!trimmed) return { chainId: fallbackChain, id: "" };
+    if (/dexscreener\.com/i.test(trimmed)) {
+        try {
+            const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+            const { pathname } = new URL(href);
+            const parts = pathname.split("/").filter(Boolean);
+            if (parts.length >= 2) {
+                const chainFromPath = parts[parts.length - 2]!.toLowerCase();
+                const last = parts[parts.length - 1]!;
+                if (chainFromPath && last && /^[a-z0-9_]+$/.test(chainFromPath)) {
+                    return { chainId: chainFromPath, id: last };
+                }
+            }
+        } catch {
+            /* use whole string as id below */
+        }
+    }
+    return { chainId: fallbackChain, id: trimmed };
+}
+
+async function fetchDexPairByChainAndId(chainId: string, rawId: string): Promise<DexPair | null> {
+    const pid = normalizeDexScreenerPairId(rawId);
+    if (!pid) return null;
+    const data = await fetchJson<{ pair?: DexPair; pairs?: DexPair[] }>(`${PAIRS_BASE}/${chainId}/${pid}`);
+    const pair = data?.pair ?? data?.pairs?.[0];
+    return pair ?? null;
+}
+
+/**
+ * Resolve a pasted base/quote token contract address to a single `TokenSignal` (best-liquidity pair).
+ * Skips scan-list-only filters (gainer / min-flow) so manual adds still appear; keeps Dex safety heuristics.
+ * Accepts a bare mint/pair id or a DexScreener pair/token URL (`…/solana/…`).
+ */
+export async function resolveDexTokenFromAddress(
+    chainIdRaw: string,
+    tokenAddressRaw: string,
+    timeframe: TimeframeKey,
+    entryGuards: EntryGuardOptions
+): Promise<ResolveDexTokenResult> {
+    const { chainId, id: tokenAddress } = parseDexscreenerPasteInput(tokenAddressRaw, chainIdRaw);
+    if (!tokenAddress) return { ok: false, error: "Token address, pair id, or DexScreener link is required" };
+    if (!dexBoostChainAllowed(chainId)) {
+        return {
+            ok: false,
+            error: `Chain "${chainId}" is not enabled for DEX (configure BFF_DEX_SCAN_CHAIN_IDS or use solana).`,
+        };
+    }
+
+    let pair = await fetchDexPairByChainAndId(chainId, tokenAddress);
+    if (!pair) {
+        pair = await bestPairForToken(chainId, tokenAddress);
+    }
+    if (!pair) {
+        return { ok: false, error: "No DexScreener pairs found for that address or link" };
+    }
+
+    const minAgeMin = entryGuards.dexMinPairAgeMinutes;
+    const minPairAgeMsOverride =
+        typeof minAgeMin === "number" && Number.isFinite(minAgeMin) && minAgeMin >= 1
+            ? Math.round(minAgeMin) * 60_000
+            : undefined;
+    const ageOverrides = minPairAgeMsOverride !== undefined ? { minPairAgeMs: minPairAgeMsOverride } : undefined;
+
+    const safety = dexPairPassesSafetyHeuristics(pair, ageOverrides);
+    if (!safety.ok) {
+        return { ok: false, error: safety.reason };
+    }
+
+    const relaxedGuards: EntryGuardOptions = {
+        ...entryGuards,
+        liquidityCheckRequired: false,
+    };
+
+    const token = pairToTokenSignal(pair, timeframe, timeframe, relaxedGuards);
+    if (!token) {
+        return { ok: false, error: "Could not build token from pair (invalid price or missing data)" };
+    }
+
+    return { ok: true, token };
+}
+
+/** Guards for manual stack: skip list gates; pairToTokenSignal still needs valid price/liquidity fields. */
+const STACK_RELAXED_GUARDS: EntryGuardOptions = {
+    liquidityGuard: "both",
+    minFiveMinuteFlowUsdt: 0,
+    liquidityCheckRequired: false,
+    minMarketCapUsd: 0,
+    maxMarketCapUsd: 0,
+    minEntryChartTimeframes: [],
+};
+
+/**
+ * Manual second leg when the token is not in the top scan list: load the saved pair by address.
+ * Skips scam heuristics — caller already holds the asset.
+ */
+export async function tokenSignalFromDexPairForStack(
+    chainIdRaw: string,
+    pairAddressRaw: string,
+    timeframe: TimeframeKey
+): Promise<ResolveDexTokenResult> {
+    const chainId = String(chainIdRaw ?? "").trim().toLowerCase();
+    const id = normalizeDexScreenerPairId(pairAddressRaw);
+    if (!id || !dexBoostChainAllowed(chainId)) {
+        return { ok: false, error: "Invalid chain or pair address for DEX stack resolve" };
+    }
+    const data = await fetchJson<{ pair?: DexPair; pairs?: DexPair[] }>(`${PAIRS_BASE}/${chainId}/${id}`);
+    const pair = data?.pair ?? data?.pairs?.[0];
+    if (!pair) return { ok: false, error: "Pair not found on DexScreener" };
+
+    const token = pairToTokenSignal(pair, timeframe, timeframe, STACK_RELAXED_GUARDS);
+    if (!token) return { ok: false, error: "Pair has no usable price on DexScreener" };
+    return { ok: true, token };
+}
+
+/**
+ * Manual stack: best-liquidity pool for mint when the scan window does not include this token.
+ * Skips scam heuristics — caller already holds the asset.
+ */
+export async function resolveDexTokenForStack(
+    chainIdRaw: string,
+    tokenAddressRaw: string,
+    timeframe: TimeframeKey
+): Promise<ResolveDexTokenResult> {
+    const chainId = String(chainIdRaw ?? "").trim().toLowerCase();
+    const tokenAddress = String(tokenAddressRaw ?? "").trim();
+    if (!tokenAddress) return { ok: false, error: "Token mint is required" };
+    if (!dexBoostChainAllowed(chainId)) {
+        return { ok: false, error: `Chain "${chainId}" is not enabled for DEX` };
+    }
+    const pair = await bestPairForToken(chainId, tokenAddress);
+    if (!pair) return { ok: false, error: "No DexScreener pools for that mint" };
+    const token = pairToTokenSignal(pair, timeframe, timeframe, STACK_RELAXED_GUARDS);
+    if (!token) return { ok: false, error: "Could not build quote from pool" };
+    return { ok: true, token };
 }
 
 async function bestPairForToken(chainId: string, tokenAddress: string): Promise<DexPair | null> {
@@ -331,12 +599,30 @@ async function bestPairForToken(chainId: string, tokenAddress: string): Promise<
 }
 
 export async function fetchDexPairPriceUsd(chainId: string, pairAddress: string): Promise<number | null> {
-    const data = await fetchJson<{ pair?: DexPair; pairs?: DexPair[] }>(
-        `${PAIRS_BASE}/${chainId}/${pairAddress}`
-    );
+    const id = normalizeDexScreenerPairId(pairAddress);
+    const data = await fetchJson<{ pair?: DexPair; pairs?: DexPair[] }>(`${PAIRS_BASE}/${chainId}/${id}`);
     const pair = data?.pair ?? data?.pairs?.[0];
     const px = Number(pair?.priceUsd);
     return Number.isFinite(px) && px > 0 ? px : null;
+}
+
+/**
+ * Accepts a bare pair id (DexScreener /pairs/{chain}/{id}) or a full token page URL; returns the id for API calls.
+ */
+export function normalizeDexScreenerPairId(raw: string): string {
+    const s = String(raw ?? "").trim();
+    if (!s) return "";
+    if (!/dexscreener\.com/i.test(s)) return s;
+    try {
+        const href = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+        const path = new URL(href).pathname.replace(/\/+$/, "");
+        const segments = path.split("/").filter(Boolean);
+        const last = segments[segments.length - 1];
+        if (last && /^[a-zA-Z0-9]+$/.test(last)) return last;
+    } catch {
+        /* ignore */
+    }
+    return s;
 }
 
 function normalizeBoostsPayload(raw: unknown): DexBoost[] {
@@ -368,6 +654,7 @@ export async function scanTopSignalsDexscreener(
     const jobs: { chainId: string; tokenAddress: string }[] = [];
     for (const b of boosts) {
         if (!b.chainId || !b.tokenAddress) continue;
+        if (!dexBoostChainAllowed(b.chainId)) continue;
         const key = `${b.chainId}:${b.tokenAddress}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -375,10 +662,20 @@ export async function scanTopSignalsDexscreener(
         if (jobs.length >= 80) break;
     }
 
+    const minAgeMin = options?.dexMinPairAgeMinutes;
+    const minPairAgeMsOverride =
+        typeof minAgeMin === "number" && Number.isFinite(minAgeMin) && minAgeMin >= 1
+            ? Math.round(minAgeMin) * 60_000
+            : undefined;
+    const ageOverrides = minPairAgeMsOverride !== undefined ? { minPairAgeMs: minPairAgeMsOverride } : undefined;
+
     const pairs: DexPair[] = [];
     for (const job of jobs) {
         const p = await bestPairForToken(job.chainId, job.tokenAddress);
-        if (p) pairs.push(p);
+        if (!p) continue;
+        const safety = dexPairPassesSafetyHeuristics(p, ageOverrides);
+        if (!safety.ok) continue;
+        pairs.push(p);
     }
 
     const safeLimit = Math.max(1, Math.min(20, limit));
@@ -388,6 +685,7 @@ export async function scanTopSignalsDexscreener(
         .filter((t): t is TokenSignal => t !== null)
         .filter((t) => dexMeetsMinQuoteFlow(t, min5m, options))
         .filter(tokenPassesDexscreenerScanFilter)
+        .filter((t) => tokenPassesMinEntryCharts(t, options))
         .sort((a, b) => b.gainPercent - a.gainPercent)
         .slice(0, safeLimit);
 
