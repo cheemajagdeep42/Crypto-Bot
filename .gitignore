@@ -11,5 +11,7 @@ Thumbs.db
 *.sqlite
 *.sqlite-journal
 *.db
+# Local BFF bot persistence (positions, logs) — do not commit
+bff/data/bot-state.json
 coverage/
 .turbo/
